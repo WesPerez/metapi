@@ -18,6 +18,7 @@ import ResponsiveFormGrid from '../components/ResponsiveFormGrid.js';
 import { useIsMobile } from '../components/useIsMobile.js';
 import DeleteConfirmModal from '../components/DeleteConfirmModal.js';
 import SiteCreatedModal from '../components/SiteCreatedModal.js';
+import EnabledModelsSummary from '../components/EnabledModelsSummary.js';
 import { formatDateTimeLocal } from './helpers/checkinLogTime.js';
 import { clearFocusParams, readFocusSiteId } from './helpers/navigationFocus.js';
 import { tr } from '../i18n.js';
@@ -68,6 +69,7 @@ type SiteRow = {
   sortOrder?: number;
   totalBalance?: number;
   subscriptionSummary?: SiteSubscriptionSummary | null;
+  enabledModels?: string[];
   createdAt?: string;
   postRefreshProbeEnabled?: boolean;
   postRefreshProbeModel?: string | null;
@@ -328,6 +330,8 @@ export default function Sites() {
   const probeLogEndRef = useRef<HTMLDivElement | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [disabledModelSearch, setDisabledModelSearch] = useState('');
+  const [sitesPage, setSitesPage] = useState(1);
+  const [sitesPageSize, setSitesPageSize] = useState(15);
   const initializationPresetOptions = useMemo(() => listSiteInitializationPresets(), []);
   const selectedInitializationPreset = useMemo(
     () => getSiteInitializationPreset(selectedInitializationPresetId),
@@ -420,10 +424,22 @@ export default function Sites() {
   }, []);
 
   const sortedSites = useMemo(
-    () => sortItemsForDisplay(sites, sortMode, (site) => site.totalBalance || 0),
+    () => sortItemsForDisplay(
+      sites,
+      sortMode,
+      (site) => site.totalBalance || 0,
+      (site) => site.status === 'disabled',
+    ),
     [sites, sortMode],
   );
-  const allVisibleSitesSelected = sortedSites.length > 0 && sortedSites.every((site) => selectedSiteIds.includes(site.id));
+  const totalSitesCount = sortedSites.length;
+  const sitesTotalPages = Math.ceil(totalSitesCount / sitesPageSize);
+  const paginatedSites = useMemo(() => {
+    const startIndex = (sitesPage - 1) * sitesPageSize;
+    const endIndex = startIndex + sitesPageSize;
+    return sortedSites.slice(startIndex, endIndex);
+  }, [sortedSites, sitesPage, sitesPageSize]);
+  const allVisibleSitesSelected = paginatedSites.length > 0 && paginatedSites.every((site) => selectedSiteIds.includes(site.id));
 
   const platformOptions = useMemo(() => {
     const current = form.platform.trim();
@@ -577,6 +593,7 @@ export default function Sites() {
       } catch {
         toast.error('禁用模型列表已保存，但路由重建失败，请手动刷新路由');
       }
+      await load();
     } catch (e: any) {
       toast.error(e.message || '保存禁用模型失败');
     } finally {
@@ -1047,7 +1064,12 @@ export default function Sites() {
   };
 
   const handleMoveCustomOrder = async (site: SiteRow, direction: 'up' | 'down') => {
-    const updates = buildCustomReorderUpdates(sites, site.id, direction);
+    const updates = buildCustomReorderUpdates(
+      sites,
+      site.id,
+      direction,
+      (item) => item.status === 'disabled',
+    );
     if (updates.length === 0) return;
 
     setOrderingSiteId(site.id);
@@ -1071,10 +1093,10 @@ export default function Sites() {
 
   const toggleSelectAllVisible = (checked: boolean) => {
     if (!checked) {
-      setSelectedSiteIds((current) => current.filter((id) => !sortedSites.some((site) => site.id === id)));
+      setSelectedSiteIds((current) => current.filter((id) => !paginatedSites.some((site) => site.id === id)));
       return;
     }
-    setSelectedSiteIds((current) => Array.from(new Set([...current, ...sortedSites.map((site) => site.id)])));
+    setSelectedSiteIds((current) => Array.from(new Set([...current, ...paginatedSites.map((site) => site.id)])));
   };
 
   const toggleSiteDetails = (siteId: number) => {
@@ -1145,7 +1167,79 @@ export default function Sites() {
   return (
     <div className="animate-fade-in">
       <div className="page-header">
-        <h2 className="page-title">{tr('站点管理')}</h2>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <h2 className="page-title" style={{ margin: 0 }}>{tr('站点管理')}</h2>
+          {!isMobile && (
+            <>
+              <button
+                type="button"
+                data-testid="sites-bulk-enable-all"
+                className="btn btn-ghost"
+                style={{ border: '1px solid var(--color-border)', padding: '6px 10px', fontSize: 12 }}
+                disabled={batchActionLoading || sortedSites.length === 0}
+                onClick={async () => {
+                  const ids = sortedSites
+                    .filter((s: any) => s?.status === 'disabled')
+                    .map((s: any) => Number(s.id))
+                    .filter((id: number) => Number.isFinite(id) && id > 0);
+                  if (ids.length === 0) {
+                    toast.info('当前没有需要启用的站点');
+                    return;
+                  }
+                  setBatchActionLoading(true);
+                  try {
+                    const result = await api.batchUpdateSites({ ids, action: 'enable' });
+                    const ok = Array.isArray(result?.successIds) ? result.successIds.length : 0;
+                    const fail = Array.isArray(result?.failedItems) ? result.failedItems.length : 0;
+                    toast[fail > 0 ? 'info' : 'success'](
+                      fail > 0 ? `全部启用完成：成功 ${ok}，失败 ${fail}` : `已启用 ${ok} 个站点`,
+                    );
+                    await load();
+                  } catch (e: any) {
+                    toast.error(e?.message || '全部启用失败');
+                  } finally {
+                    setBatchActionLoading(false);
+                  }
+                }}
+              >
+                全部启用
+              </button>
+              <button
+                type="button"
+                data-testid="sites-bulk-disable-all"
+                className="btn btn-ghost"
+                style={{ border: '1px solid var(--color-border)', padding: '6px 10px', fontSize: 12 }}
+                disabled={batchActionLoading || sortedSites.length === 0}
+                onClick={async () => {
+                  const ids = sortedSites
+                    .filter((s: any) => s?.status !== 'disabled')
+                    .map((s: any) => Number(s.id))
+                    .filter((id: number) => Number.isFinite(id) && id > 0);
+                  if (ids.length === 0) {
+                    toast.info('当前没有需要禁用的站点');
+                    return;
+                  }
+                  setBatchActionLoading(true);
+                  try {
+                    const result = await api.batchUpdateSites({ ids, action: 'disable' });
+                    const ok = Array.isArray(result?.successIds) ? result.successIds.length : 0;
+                    const fail = Array.isArray(result?.failedItems) ? result.failedItems.length : 0;
+                    toast[fail > 0 ? 'info' : 'success'](
+                      fail > 0 ? `全部禁用完成：成功 ${ok}，失败 ${fail}` : `已禁用 ${ok} 个站点`,
+                    );
+                    await load();
+                  } catch (e: any) {
+                    toast.error(e?.message || '全部禁用失败');
+                  } finally {
+                    setBatchActionLoading(false);
+                  }
+                }}
+              >
+                全部禁用
+              </button>
+            </>
+          )}
+        </div>
         <div className="page-actions sites-page-actions">
           {isMobile ? (
             <>
@@ -1941,7 +2035,7 @@ export default function Sites() {
         {sites.length > 0 ? (
           isMobile ? (
             <div className="mobile-card-list">
-              {sortedSites.map((site) => {
+              {paginatedSites.map((site) => {
                 const isExpanded = expandedSiteIds.includes(site.id);
                 return (
                   <MobileCard
@@ -2034,6 +2128,11 @@ export default function Sites() {
                       )}
                     />
                     <MobileField label="权重" value={(site.globalWeight || 1).toFixed(2)} />
+                    <MobileField
+                      label="启用模型"
+                      value={<EnabledModelsSummary models={site.enabledModels || []} />}
+                      stacked
+                    />
                     {isExpanded ? (
                       <div className="mobile-card-extra">
                         <MobileField
@@ -2168,19 +2267,20 @@ export default function Sites() {
                       onChange={(e) => toggleSelectAllVisible(e.target.checked)}
                     />
                   </th>
-                  <th>名称</th>
-                  <th>外部签到站URL</th>
-                  <th>总余额</th>
-                  <th>状态</th>
-                  <th>系统代理</th>
-                  <th>权重</th>
-                  <th>平台</th>
-                  <th>创建时间</th>
-                  <th className="sites-actions-col" style={{ textAlign: 'right' }}>操作</th>
+                 <th>名称</th>
+                 <th>主站URL</th>
+                 <th>总余额</th>
+                 <th>状态</th>
+                 <th>系统代理</th>
+                 <th>权重</th>
+                 <th>启用模型</th>
+                 <th>平台</th>
+                 <th>创建时间</th>
+                 <th className="sites-actions-col" style={{ textAlign: 'right' }}>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedSites.map((site, i) => (
+                {paginatedSites.map((site, i) => (
                   <tr
                     key={site.id}
                     data-testid={`site-row-${site.id}`}
@@ -2223,23 +2323,21 @@ export default function Sites() {
                       </div>
                     </td>
                     <td className="sites-url-cell" style={{ maxWidth: 300 }}>
-                      {site.externalCheckinUrl ? (
-                        <a
-                          href={site.externalCheckinUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="sites-url-link"
-                          style={{
-                            fontSize: 12,
-                            fontFamily: 'var(--font-mono)',
-                            color: 'var(--color-primary)',
-                            textDecoration: 'underline',
-                            wordBreak: 'break-all',
-                          }}
-                        >
-                          {site.externalCheckinUrl}
-                        </a>
-                      ) : null}
+                      <a
+                        href={site.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="sites-url-link"
+                        style={{
+                          fontSize: 12,
+                          fontFamily: 'var(--font-mono)',
+                          color: 'var(--color-primary)',
+                          textDecoration: 'underline',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {site.url}
+                      </a>
                     </td>
                     <td className="site-balance-cell">
                       <SiteBalanceDisplay
@@ -2248,9 +2346,22 @@ export default function Sites() {
                       />
                     </td>
                     <td>
-                      <span className={`badge ${site.status === 'disabled' ? 'badge-muted' : 'badge-success'}`} style={{ fontSize: 11 }}>
-                        {site.status === 'disabled' ? '禁用' : '启用'}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStatus(site)}
+                        disabled={togglingSiteId === site.id}
+                        className="sites-status-toggle"
+                        title={site.status === 'disabled' ? '点击启用' : '点击禁用'}
+                      >
+                        {togglingSiteId === site.id ? <span className="spinner spinner-sm" /> : (
+                          <span
+                            className={`badge ${site.status === 'disabled' ? 'badge-muted' : 'badge-success'}`}
+                            style={{ fontSize: 13, fontWeight: 700, padding: '6px 14px', borderRadius: 999, minWidth: 56, justifyContent: 'center' }}
+                          >
+                            {site.status === 'disabled' ? '启用' : '禁用'}
+                          </span>
+                        )}
+                      </button>
                     </td>
                     <td>
                       <span className={`badge ${site.useSystemProxy ? 'badge-info' : 'badge-muted'}`} style={{ fontSize: 11 }}>
@@ -2259,6 +2370,9 @@ export default function Sites() {
                     </td>
                     <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
                       {(site.globalWeight || 1).toFixed(2)}
+                    </td>
+                    <td style={{ minWidth: 240 }}>
+                      <EnabledModelsSummary models={site.enabledModels || []} />
                     </td>
                     <td>
                       <a
@@ -2322,13 +2436,6 @@ export default function Sites() {
                           编辑
                         </button>
                         <button
-                          onClick={() => handleToggleStatus(site)}
-                          disabled={togglingSiteId === site.id}
-                          className={`btn btn-link ${site.status === 'disabled' ? 'btn-link-primary' : 'btn-link-warning'}`}
-                        >
-                          {togglingSiteId === site.id ? <span className="spinner spinner-sm" /> : (site.status === 'disabled' ? '启用' : '禁用')}
-                        </button>
-                        <button
                           onClick={() => handleDelete(site)}
                           disabled={deleting === site.id}
                           className="btn btn-link btn-link-danger"
@@ -2358,6 +2465,78 @@ export default function Sites() {
           </div>
         )}
       </div>
+
+      {sites.length > 0 && sitesTotalPages > 1 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '12px 16px',
+          gap: 12,
+          flexWrap: 'wrap',
+          background: 'var(--color-bg-card)',
+          borderRadius: 'var(--radius-md)',
+        }}>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+            显示第 {(sitesPage - 1) * sitesPageSize + 1} - {Math.min(sitesPage * sitesPageSize, totalSitesCount)} 条，共 {totalSitesCount} 条
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setSitesPage(1)}
+              disabled={sitesPage === 1}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              首页
+            </button>
+            <button
+              onClick={() => setSitesPage(p => Math.max(1, p - 1))}
+              disabled={sitesPage === 1}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              上一页
+            </button>
+            <span style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>
+              {sitesPage} / {sitesTotalPages}
+            </span>
+            <button
+              onClick={() => setSitesPage(p => Math.min(sitesTotalPages, p + 1))}
+              disabled={sitesPage === sitesTotalPages}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              下一页
+            </button>
+            <button
+              onClick={() => setSitesPage(sitesTotalPages)}
+              disabled={sitesPage === sitesTotalPages}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              末页
+            </button>
+            <select
+              value={sitesPageSize}
+              onChange={(e) => { setSitesPageSize(Number(e.target.value)); setSitesPage(1); }}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 13,
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-primary)',
+              }}
+            >
+              <option value={10}>10 条/页</option>
+              <option value={15}>15 条/页</option>
+              <option value={20}>20 条/页</option>
+              <option value={50}>50 条/页</option>
+              <option value={100}>100 条/页</option>
+            </select>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -58,6 +58,7 @@ describe('Sites disabled models save', () => {
         url: 'https://example.com',
         platform: 'new-api',
         status: 'active',
+        enabledModels: ['gpt-4o', 'claude-sonnet'],
       },
     ]);
     apiMock.getSiteDisabledModels.mockResolvedValue({ models: [] });
@@ -96,6 +97,20 @@ describe('Sites disabled models save', () => {
 
     return root;
   }
+
+  it('shows all non-disabled models in the site list', async () => {
+    let root!: WebTestRenderer;
+    try {
+      root = await renderSitesEditor();
+
+      const rendered = JSON.stringify(root.toJSON());
+      expect(rendered).toContain('启用模型');
+      expect(rendered).toContain('gpt-4o');
+      expect(rendered).toContain('claude-sonnet');
+    } finally {
+      root?.unmount();
+    }
+  });
 
   it('reports route rebuild failure after saving disabled models from sites editor', async () => {
     apiMock.rebuildRoutes.mockRejectedValue(new Error('rebuild failed'));

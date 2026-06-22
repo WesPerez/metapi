@@ -10,6 +10,7 @@ const { apiMock } = vi.hoisted(() => ({
     getAccounts: vi.fn(),
     getAccountsSnapshot: vi.fn(),
     getSites: vi.fn(),
+    updateAccount: vi.fn(),
     batchUpdateAccounts: vi.fn(),
     refreshAccountHealth: vi.fn(),
   },
@@ -56,6 +57,7 @@ describe('Accounts batch actions', () => {
       successIds: [1, 2],
       failedItems: [],
     });
+    apiMock.updateAccount.mockResolvedValue({ success: true });
     apiMock.refreshAccountHealth.mockResolvedValue({ success: true });
   });
 
@@ -171,6 +173,46 @@ describe('Accounts batch actions', () => {
 
       const checkbox = root.root.find((node) => node.props['data-testid'] === 'account-select-2');
       expect(checkbox.props.checked).toBe(true);
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('toggles an apikey connection from the dedicated status column', async () => {
+    apiMock.getAccounts.mockResolvedValue([
+      {
+        id: 2,
+        siteId: 1,
+        username: '',
+        accessToken: '',
+        apiToken: 'sk-apikey',
+        credentialMode: 'apikey',
+        status: 'active',
+        enabledModels: ['gpt-4o'],
+        site: { id: 1, name: 'Site A', status: 'active', platform: 'new-api' },
+      },
+    ]);
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts?segment=apikey']}>
+            <ToastProvider>
+              <Accounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const toggleButton = root.root.find((node) => node.props['data-testid'] === 'account-status-toggle-2');
+      await act(async () => {
+        toggleButton.props.onClick();
+      });
+      await flushMicrotasks();
+
+      expect(apiMock.updateAccount).toHaveBeenCalledWith(2, { status: 'disabled' });
     } finally {
       root?.unmount();
     }

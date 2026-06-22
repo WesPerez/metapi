@@ -10,9 +10,18 @@ export function sortItemsForDisplay<T extends SortableBase>(
   items: T[],
   mode: SortMode,
   getBalance: (item: T) => number,
+  isDisabled: (item: T) => boolean = () => false,
 ): T[] {
   const list = [...items];
+  const disabledComparator = (a: T, b: T) => {
+    const aDisabled = isDisabled(a) ? 1 : 0;
+    const bDisabled = isDisabled(b) ? 1 : 0;
+    return aDisabled - bDisabled;
+  };
   const customComparator = (a: T, b: T) => {
+    const disabledDiff = disabledComparator(a, b);
+    if (disabledDiff !== 0) return disabledDiff;
+
     const aPinned = a.isPinned ? 1 : 0;
     const bPinned = b.isPinned ? 1 : 0;
     if (aPinned !== bPinned) return bPinned - aPinned;
@@ -28,6 +37,9 @@ export function sortItemsForDisplay<T extends SortableBase>(
   }
 
   return list.sort((a, b) => {
+    const disabledDiff = disabledComparator(a, b);
+    if (disabledDiff !== 0) return disabledDiff;
+
     const aPinned = a.isPinned ? 1 : 0;
     const bPinned = b.isPinned ? 1 : 0;
     if (aPinned !== bPinned) return bPinned - aPinned;
@@ -46,13 +58,17 @@ export function buildCustomReorderUpdates<T extends SortableBase>(
   items: T[],
   targetId: number,
   direction: 'up' | 'down',
+  isDisabled: (item: T) => boolean = () => false,
 ): Array<{ id: number; sortOrder: number }> {
-  const sorted = sortItemsForDisplay(items, 'custom', () => 0);
+  const sorted = sortItemsForDisplay(items, 'custom', () => 0, isDisabled);
   const target = sorted.find((item) => item.id === targetId);
   if (!target) return [];
 
   const targetPinned = !!target.isPinned;
-  const group = sorted.filter((item) => !!item.isPinned === targetPinned);
+  const targetDisabled = isDisabled(target);
+  const group = sorted.filter((item) => (
+    !!item.isPinned === targetPinned && isDisabled(item) === targetDisabled
+  ));
   const index = group.findIndex((item) => item.id === targetId);
   if (index < 0) return [];
 

@@ -28,6 +28,9 @@ describe('sites disabled models API', () => {
     });
 
     beforeEach(async () => {
+        await db.delete(schema.tokenModelAvailability).run();
+        await db.delete(schema.accountTokens).run();
+        await db.delete(schema.modelAvailability).run();
         await db.delete(schema.siteDisabledModels).run();
         await db.delete(schema.accounts).run();
         await db.delete(schema.sites).run();
@@ -85,6 +88,51 @@ describe('sites disabled models API', () => {
         expect(getBody.models).toHaveLength(2);
         expect(getBody.models).toContain('gpt-4o');
         expect(getBody.models).toContain('claude-sonnet-4-5-20250929');
+    });
+
+    it('returns enabled models in site list with site-disabled models excluded', async () => {
+        const site = await db.insert(schema.sites).values({
+            name: 'model-site',
+            url: 'https://model-site.example.com',
+            platform: 'new-api',
+        }).returning().get();
+        const account = await db.insert(schema.accounts).values({
+            siteId: site.id,
+            username: 'api-key-user',
+            accessToken: '',
+            apiToken: 'sk-models',
+            status: 'active',
+        }).returning().get();
+        const token = await db.insert(schema.accountTokens).values({
+            accountId: account.id,
+            name: 'default',
+            token: 'sk-token',
+            enabled: true,
+        }).returning().get();
+
+        await db.insert(schema.modelAvailability).values([
+            { accountId: account.id, modelName: 'gpt-4o', available: true },
+            { accountId: account.id, modelName: 'gpt-disabled', available: true },
+            { accountId: account.id, modelName: 'gpt-unavailable', available: false },
+        ]).run();
+        await db.insert(schema.tokenModelAvailability).values({
+            tokenId: token.id,
+            modelName: 'claude-sonnet',
+            available: true,
+        }).run();
+        await db.insert(schema.siteDisabledModels).values({
+            siteId: site.id,
+            modelName: 'gpt-disabled',
+        }).run();
+
+        const resp = await app.inject({
+            method: 'GET',
+            url: '/api/sites',
+        });
+
+        expect(resp.statusCode).toBe(200);
+        const body = resp.json();
+        expect(body[0]?.enabledModels).toEqual(['claude-sonnet', 'gpt-4o']);
     });
 
     it('replaces disabled models on subsequent PUT', async () => {

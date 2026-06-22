@@ -11,6 +11,7 @@ import { MobileCard, MobileField } from "../components/MobileCard.js";
 import { useIsMobile } from "../components/useIsMobile.js";
 import DeleteConfirmModal from "../components/DeleteConfirmModal.js";
 import SiteBadgeLink from "../components/SiteBadgeLink.js";
+import EnabledModelsSummary from "../components/EnabledModelsSummary.js";
 import AccountModelsModal from "./accounts/AccountModelsModal.js";
 import {
   buildAddAccountPrereqHint,
@@ -39,6 +40,8 @@ import { getSiteInitializationPreset } from "../../shared/siteInitializationPres
 import { parseBatchApiKeys } from "../../shared/apiKeyBatch.js";
 
 type ConnectionsSegment = "session" | "apikey" | "tokens";
+
+const API_KEY_PAGE_SIZE_OPTIONS = [15, 30, 50] as const;
 
 const ACCOUNT_SEGMENTS: Array<{
   value: ConnectionsSegment;
@@ -102,6 +105,22 @@ function resolveConnectionsSegment(search: string): ConnectionsSegment {
   const rawSegment = new URLSearchParams(search).get("segment");
   if (rawSegment === "apikey" || rawSegment === "tokens") return rawSegment;
   return "session";
+}
+
+function isAccountDisplayDisabled(account: any): boolean {
+  return (
+    account.status === "disabled" ||
+    account.site?.status === "disabled" ||
+    account.runtimeHealth?.state === "disabled"
+  );
+}
+
+function buildAccountSiteGroupKey(account: any): string {
+  const siteId = Number(account?.site?.id ?? account?.siteId);
+  if (Number.isFinite(siteId) && siteId > 0) return `id:${Math.trunc(siteId)}`;
+  const siteName = String(account?.site?.name || "").trim().toLowerCase();
+  const siteUrl = String(account?.site?.url || "").trim().toLowerCase();
+  return `fallback:${siteName}:${siteUrl}`;
 }
 
 export default function Accounts() {
@@ -190,6 +209,11 @@ export default function Accounts() {
     manualModelsInput: "",
     addingManualModels: false,
   });
+  const [apiKeyPage, setApiKeyPage] = useState(1);
+  const [apiKeyPageSize, setApiKeyPageSize] = useState<number>(15);
+  const [apiKeyEnabledModelFilter, setApiKeyEnabledModelFilter] = useState<string>("");
+  const [apiKeySiteFilter, setApiKeySiteFilter] = useState<string>("");
+  const [apiKeyShowDisabled, setApiKeyShowDisabled] = useState<boolean>(false);
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRebindTargetRef = useRef<any | null>(null);
@@ -292,18 +316,115 @@ export default function Accounts() {
         accounts,
         sortMode,
         (account) => account.balance || 0,
+        isAccountDisplayDisabled,
       ),
     [accounts, sortMode],
   );
   const visibleAccounts = useMemo(() => {
     if (activeSegment === "tokens") return [];
-    return sortedAccounts.filter(
+    const filtered = sortedAccounts.filter(
       (account) => resolveAccountCredentialMode(account) === activeSegment,
     );
+    if (activeSegment !== "apikey") return filtered;
+
+    const statusFiltered = apiKeyShowDisabled
+      ? filtered
+      : filtered.filter((account) => {
+          const accountDisabled = account?.status === "disabled";
+          const siteDisabled = account?.site?.status === "disabled";
+          return !accountDisabled && !siteDisabled;
+        });
+
+    const trimmedFilter = apiKeyEnabledModelFilter.trim();
+    const modelFiltered = trimmedFilter
+      ? statusFiltered.filter((account) => {
+          const models = Array.isArray(account?.enabledModels)
+            ? account.enabledModels
+            : [];
+          return models.some(
+            (model: unknown) => String(model || "") === trimmedFilter,
+          );
+        })
+      : statusFiltered;
+    const trimmedSiteFilter = apiKeySiteFilter.trim();
+    const siteFilteredAccounts = trimmedSiteFilter
+      ? modelFiltered.filter((account) => {
+          const siteId = Number(account?.site?.id ?? account?.siteId);
+          return Number.isFinite(siteId) && String(siteId) === trimmedSiteFilter;
+        })
+      : modelFiltered;
+
+    const sortedIndexById = new Map<number, number>();
+    const siteOrder = new Map<string, number>();
+    siteFilteredAccounts.forEach((account, index) => {
+      sortedIndexById.set(account.id, index);
+      const siteKey = buildAccountSiteGroupKey(account);
+      if (!siteOrder.has(siteKey)) siteOrder.set(siteKey, siteOrder.size);
+    });
+
+    return [...siteFilteredAccounts].sort((left, right) => {
+      const leftSiteOrder = siteOrder.get(buildAccountSiteGroupKey(left)) ?? 0;
+      const rightSiteOrder = siteOrder.get(buildAccountSiteGroupKey(right)) ?? 0;
+      if (leftSiteOrder !== rightSiteOrder) return leftSiteOrder - rightSiteOrder;
+      return (sortedIndexById.get(left.id) ?? 0) - (sortedIndexById.get(right.id) ?? 0);
+    });
+  }, [
+    activeSegment,
+    sortedAccounts,
+    apiKeyEnabledModelFilter,
+    apiKeySiteFilter,
+    apiKeyShowDisabled,
+  ]);
+  const apiKeyEnabledModelOptions = useMemo(() => {
+    if (activeSegment !== "apikey") return [] as string[];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const account of sortedAccounts) {
+      if (resolveAccountCredentialMode(account) !== "apikey") continue;
+      const models = Array.isArray(account?.enabledModels)
+        ? account.enabledModels
+        : [];
+      for (const raw of models) {
+        const value = String(raw || "").trim();
+        if (!value || seen.has(value)) continue;
+        seen.add(value);
+        result.push(value);
+      }
+    }
+    result.sort((a, b) => a.localeCompare(b));
+    return result;
   }, [activeSegment, sortedAccounts]);
-  const allVisibleAccountsSelected =
-    visibleAccounts.length > 0 &&
-    visibleAccounts.every((account) => selectedAccountIds.includes(account.id));
+  const apiKeySiteOptions = useMemo(() => {
+    if (activeSegment !== "apikey") return [] as Array<{ id: number; name: string }>;
+    const seen = new Map<number, string>();
+    for (const account of sortedAccounts) {
+      if (resolveAccountCredentialMode(account) !== "apikey") continue;
+      const id = Number(account?.site?.id ?? account?.siteId);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      if (seen.has(id)) continue;
+      const name =
+        String(account?.site?.name || "").trim() ||
+        String(account?.site?.url || "").trim() ||
+        `站点 #${id}`;
+      seen.set(id, name);
+    }
+    return Array.from(seen.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [activeSegment, sortedAccounts]);
+  const apiKeyTotalPages = Math.max(
+    1,
+    Math.ceil(visibleAccounts.length / apiKeyPageSize),
+  );
+  const effectiveApiKeyPage = Math.min(Math.max(apiKeyPage, 1), apiKeyTotalPages);
+  const displayedAccounts = useMemo(() => {
+    if (activeSegment !== "apikey") return visibleAccounts;
+    const start = (effectiveApiKeyPage - 1) * apiKeyPageSize;
+    return visibleAccounts.slice(start, start + apiKeyPageSize);
+  }, [activeSegment, effectiveApiKeyPage, apiKeyPageSize, visibleAccounts]);
+  const allDisplayedAccountsSelected =
+    displayedAccounts.length > 0 &&
+    displayedAccounts.every((account) => selectedAccountIds.includes(account.id));
   const verifyFailureHint = buildVerifyFailureHint(verifyResult);
   const addAccountPrereqHint = buildAddAccountPrereqHint(verifyResult);
 
@@ -327,6 +448,17 @@ export default function Accounts() {
     if (rebindTarget) closeRebindPanel();
     setEditingAccount(null);
   }, [activeSegment]);
+
+  useEffect(() => {
+    if (activeSegment !== "apikey") {
+      setApiKeyPage(1);
+      if (apiKeyEnabledModelFilter) setApiKeyEnabledModelFilter("");
+      if (apiKeySiteFilter) setApiKeySiteFilter("");
+      if (apiKeyShowDisabled) setApiKeyShowDisabled(false);
+      return;
+    }
+    setApiKeyPage((current) => Math.min(Math.max(current, 1), apiKeyTotalPages));
+  }, [activeSegment, apiKeyTotalPages]);
 
   useEffect(() => {
     if (activeSegment === "tokens") return;
@@ -705,6 +837,7 @@ export default function Accounts() {
       } catch {
         toast.error("模型禁用设置已保存，但路由重建失败，请手动刷新路由");
       }
+      void load(true);
       closeModelModal();
     } catch (e: any) {
       toast.error(e.message || "保存失败");
@@ -733,6 +866,7 @@ export default function Accounts() {
         await loadModelModalModels(modelModal.account, {
           refreshUpstream: false,
         });
+        void load(true);
       } else {
         toast.error(res.message || "手动添加模型失败");
       }
@@ -875,6 +1009,22 @@ export default function Accounts() {
     }
   };
 
+  const handleToggleAccountStatus = async (account: any) => {
+    const key = `status-toggle-${account.id}`;
+    const nextDisabled = account.status !== "disabled";
+    const nextStatus = nextDisabled ? "disabled" : "active";
+    setActionLoading((s) => ({ ...s, [key]: true }));
+    try {
+      await api.updateAccount(account.id, { status: nextStatus });
+      toast.success(nextDisabled ? "API Key 已禁用" : "API Key 已启用");
+      load(true);
+    } catch (e: any) {
+      toast.error(e.message || "切换 API Key 状态失败");
+    } finally {
+      setActionLoading((s) => ({ ...s, [key]: false }));
+    }
+  };
+
   const handleTogglePin = async (account: any) => {
     const key = `pin-toggle-${account.id}`;
     const nextPinned = !account.isPinned;
@@ -895,7 +1045,15 @@ export default function Accounts() {
     direction: "up" | "down",
   ) => {
     const key = `reorder-${account.id}`;
-    const updates = buildCustomReorderUpdates(accounts, account.id, direction);
+    const updates = buildCustomReorderUpdates(
+      accounts,
+      account.id,
+      direction,
+      (item) =>
+        item.status === "disabled" ||
+        item.site?.status === "disabled" ||
+        item.runtimeHealth?.state === "disabled",
+    );
     if (updates.length === 0) return;
 
     setActionLoading((s) => ({ ...s, [key]: true }));
@@ -1001,14 +1159,14 @@ export default function Accounts() {
     if (!checked) {
       setSelectedAccountIds((current) =>
         current.filter(
-          (id) => !visibleAccounts.some((account) => account.id === id),
+          (id) => !displayedAccounts.some((account) => account.id === id),
         ),
       );
       return;
     }
     setSelectedAccountIds((current) =>
       Array.from(
-        new Set([...current, ...visibleAccounts.map((account) => account.id)]),
+        new Set([...current, ...displayedAccounts.map((account) => account.id)]),
       ),
     );
   };
@@ -1192,9 +1350,26 @@ export default function Accounts() {
     if (!accountId || !loaded || activeSegment === "tokens") return;
 
     const target = visibleAccounts.find((account) => account.id === accountId);
+    const targetIndex = visibleAccounts.findIndex((account) => account.id === accountId);
     const row = rowRefs.current.get(accountId);
     const cleanedSearch = clearFocusParams(location.search);
-    if (!target || !row) {
+    if (!target) {
+      navigate(
+        { pathname: location.pathname, search: cleanedSearch },
+        { replace: true },
+      );
+      return;
+    }
+
+    if (activeSegment === "apikey" && targetIndex >= 0) {
+      const targetPage = Math.floor(targetIndex / apiKeyPageSize) + 1;
+      if (targetPage !== effectiveApiKeyPage) {
+        setApiKeyPage(targetPage);
+        return;
+      }
+    }
+
+    if (!row) {
       navigate(
         { pathname: location.pathname, search: cleanedSearch },
         { replace: true },
@@ -1228,6 +1403,8 @@ export default function Accounts() {
     );
   }, [
     activeSegment,
+    apiKeyPageSize,
+    effectiveApiKeyPage,
     loaded,
     location.pathname,
     location.search,
@@ -1248,6 +1425,88 @@ export default function Accounts() {
         canAddVerifiedConnection ||
         !!tokenForm.skipModelFetch
       : canAddVerifiedConnection;
+  const apiKeyPagination =
+    activeSegment === "apikey" && visibleAccounts.length > 0 ? (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "12px 16px",
+          gap: 12,
+          flexWrap: "wrap",
+          borderTop: "1px solid var(--color-border-light)",
+          background: "var(--color-bg-card)",
+        }}
+      >
+        <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+          显示第 {(effectiveApiKeyPage - 1) * apiKeyPageSize + 1} -{" "}
+          {Math.min(effectiveApiKeyPage * apiKeyPageSize, visibleAccounts.length)} 条，共{" "}
+          {visibleAccounts.length} 条
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => setApiKeyPage(1)}
+            disabled={effectiveApiKeyPage === 1}
+            className="btn btn-ghost"
+            style={{ padding: "6px 12px", fontSize: 13 }}
+          >
+            首页
+          </button>
+          <button
+            type="button"
+            onClick={() => setApiKeyPage((page) => Math.max(1, page - 1))}
+            disabled={effectiveApiKeyPage === 1}
+            className="btn btn-ghost"
+            style={{ padding: "6px 12px", fontSize: 13 }}
+          >
+            上一页
+          </button>
+          <span style={{ fontSize: 13, color: "var(--color-text-primary)", fontWeight: 600 }}>
+            {effectiveApiKeyPage} / {apiKeyTotalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setApiKeyPage((page) => Math.min(apiKeyTotalPages, page + 1))}
+            disabled={effectiveApiKeyPage === apiKeyTotalPages}
+            className="btn btn-ghost"
+            style={{ padding: "6px 12px", fontSize: 13 }}
+          >
+            下一页
+          </button>
+          <button
+            type="button"
+            onClick={() => setApiKeyPage(apiKeyTotalPages)}
+            disabled={effectiveApiKeyPage === apiKeyTotalPages}
+            className="btn btn-ghost"
+            style={{ padding: "6px 12px", fontSize: 13 }}
+          >
+            末页
+          </button>
+          <select
+            value={apiKeyPageSize}
+            onChange={(e) => {
+              setApiKeyPageSize(Number.parseInt(e.target.value, 10) || 15);
+              setApiKeyPage(1);
+            }}
+            style={{
+              padding: "6px 10px",
+              border: "1px solid var(--color-border)",
+              borderRadius: "var(--radius-sm)",
+              fontSize: 13,
+              background: "var(--color-bg)",
+              color: "var(--color-text-primary)",
+            }}
+            aria-label="每页数量"
+          >
+            {API_KEY_PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>{`${size} 条/页`}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+    ) : null;
 
   return (
     <div className="animate-fade-in">
@@ -1269,12 +1528,12 @@ export default function Accounts() {
                   type="button"
                   data-testid="accounts-mobile-select-all"
                   onClick={() =>
-                    toggleSelectAllVisibleAccounts(!allVisibleAccountsSelected)
+                    toggleSelectAllVisibleAccounts(!allDisplayedAccountsSelected)
                   }
                   className="btn btn-ghost"
                   style={{ border: "1px solid var(--color-border)" }}
                 >
-                  {allVisibleAccountsSelected ? "取消全选" : "全选可见项"}
+                  {allDisplayedAccountsSelected ? "取消全选" : "全选本页"}
                 </button>
               </>
             ) : (
@@ -1424,16 +1683,24 @@ export default function Accounts() {
 
       <div
         style={{
-          display: "inline-flex",
-          gap: 4,
-          padding: 4,
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 12,
           marginBottom: 16,
-          background: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-light)",
-          borderRadius: "var(--radius-md)",
         }}
       >
-        {ACCOUNT_SEGMENTS.map((segment) => (
+        <div
+          style={{
+            display: "inline-flex",
+            gap: 4,
+            padding: 4,
+            background: "var(--color-bg-card)",
+            border: "1px solid var(--color-border-light)",
+            borderRadius: "var(--radius-md)",
+          }}
+        >
+          {ACCOUNT_SEGMENTS.map((segment) => (
           <button
             key={segment.value}
             type="button"
@@ -1463,7 +1730,185 @@ export default function Accounts() {
           >
             {segment.label}
           </button>
-        ))}
+          ))}
+        </div>
+        {activeSegment === "apikey" && (
+          <>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 240,
+              }}
+              data-testid="apikey-enabled-model-filter"
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-secondary)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                启用模型
+              </span>
+              <div style={{ minWidth: 200 }}>
+                <ModernSelect
+                  size="sm"
+                  value={apiKeyEnabledModelFilter}
+                  onChange={(next) => {
+                    setApiKeyEnabledModelFilter(next);
+                    setApiKeyPage(1);
+                  }}
+                  options={[
+                    { value: "", label: "全部启用模型" },
+                    ...apiKeyEnabledModelOptions.map((model) => ({
+                      value: model,
+                      label: model,
+                    })),
+                  ]}
+                  placeholder="全部启用模型"
+                  emptyLabel="暂无可筛选模型"
+                  searchable
+                  searchPlaceholder="输入模型名筛选..."
+                />
+              </div>
+            </div>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 240,
+              }}
+              data-testid="apikey-site-filter"
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-secondary)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                节点
+              </span>
+              <div style={{ minWidth: 200 }}>
+                <ModernSelect
+                  size="sm"
+                  value={apiKeySiteFilter}
+                  onChange={(next) => {
+                    setApiKeySiteFilter(next);
+                    setApiKeyPage(1);
+                  }}
+                  options={[
+                    { value: "", label: "全部节点" },
+                    ...apiKeySiteOptions.map((site) => ({
+                      value: String(site.id),
+                      label: site.name,
+                    })),
+                  ]}
+                  placeholder="全部节点"
+                  emptyLabel="暂无可筛选节点"
+                  searchable
+                  searchPlaceholder="输入节点名筛选..."
+                />
+              </div>
+            </div>
+            <label
+              data-testid="apikey-show-disabled-toggle"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                color: "var(--color-text-secondary)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+              data-tooltip="关闭时仅显示账号与站点都启用的连接"
+            >
+              <input
+                type="checkbox"
+                checked={apiKeyShowDisabled}
+                onChange={(e) => {
+                  setApiKeyShowDisabled(e.target.checked);
+                  setApiKeyPage(1);
+                }}
+              />
+              显示已禁用
+            </label>
+            <div style={{ display: "inline-flex", gap: 6 }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ border: "1px solid var(--color-border)", padding: "6px 10px", fontSize: 12 }}
+                disabled={batchActionLoading || visibleAccounts.length === 0}
+                onClick={async () => {
+                  const ids = visibleAccounts
+                    .filter((a: any) => a?.status === "disabled")
+                    .map((a: any) => Number(a.id))
+                    .filter((id: number) => Number.isFinite(id) && id > 0);
+                  if (ids.length === 0) {
+                    toast.info("当前筛选结果中没有可启用的连接");
+                    return;
+                  }
+                  setBatchActionLoading(true);
+                  try {
+                    const result = await api.batchUpdateAccounts({ ids, action: "enable" });
+                    const ok = Array.isArray(result?.successIds) ? result.successIds.length : 0;
+                    const fail = Array.isArray(result?.failedItems) ? result.failedItems.length : 0;
+                    toast[fail > 0 ? "info" : "success"](
+                      fail > 0
+                        ? `全部启用完成：成功 ${ok}，失败 ${fail}`
+                        : `已启用 ${ok} 个连接`,
+                    );
+                    load(true);
+                  } catch (e: any) {
+                    toast.error(e?.message || "全部启用失败");
+                  } finally {
+                    setBatchActionLoading(false);
+                  }
+                }}
+              >
+                全部启用
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ border: "1px solid var(--color-border)", padding: "6px 10px", fontSize: 12 }}
+                disabled={batchActionLoading || visibleAccounts.length === 0}
+                onClick={async () => {
+                  const ids = visibleAccounts
+                    .filter((a: any) => a?.status !== "disabled")
+                    .map((a: any) => Number(a.id))
+                    .filter((id: number) => Number.isFinite(id) && id > 0);
+                  if (ids.length === 0) {
+                    toast.info("当前筛选结果中没有可禁用的连接");
+                    return;
+                  }
+                  setBatchActionLoading(true);
+                  try {
+                    const result = await api.batchUpdateAccounts({ ids, action: "disable" });
+                    const ok = Array.isArray(result?.successIds) ? result.successIds.length : 0;
+                    const fail = Array.isArray(result?.failedItems) ? result.failedItems.length : 0;
+                    toast[fail > 0 ? "info" : "success"](
+                      fail > 0
+                        ? `全部禁用完成：成功 ${ok}，失败 ${fail}`
+                        : `已禁用 ${ok} 个连接`,
+                    );
+                    load(true);
+                  } catch (e: any) {
+                    toast.error(e?.message || "全部禁用失败");
+                  } finally {
+                    setBatchActionLoading(false);
+                  }
+                }}
+              >
+                全部禁用
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <DeleteConfirmModal
@@ -2739,11 +3184,11 @@ export default function Accounts() {
             ) : null}
           </CenteredModal>
 
-          <div className="card">
+          <div className="card" style={{ overflowX: "auto" }}>
             {visibleAccounts.length > 0 ? (
               isMobile ? (
                 <div className="mobile-card-list">
-                  {visibleAccounts.map((a: any) => {
+                  {displayedAccounts.map((a: any) => {
                     const capabilities = resolveAccountCapabilities(a);
                     const connectionMode = resolveAccountCredentialMode(a);
                     const health = resolveRuntimeHealth(a);
@@ -2907,6 +3352,15 @@ export default function Accounts() {
                             </div>
                           }
                         />
+                        <MobileField
+                          label="启用模型"
+                          value={
+                            <EnabledModelsSummary
+                              models={a.enabledModels || []}
+                            />
+                          }
+                          stacked
+                        />
                         {isExpanded ? (
                           <div className="mobile-card-extra">
                             <MobileField
@@ -2952,7 +3406,7 @@ export default function Accounts() {
                                 ) : (
                                   <span
                                     className="badge badge-muted"
-                                    style={{ fontSize: 11 }}
+                                    style={{ fontSize: 11, whiteSpace: "nowrap" }}
                                   >
                                     不支持
                                   </span>
@@ -2967,6 +3421,50 @@ export default function Accounts() {
                                   : a.status || "-"
                               }
                             />
+                            {activeSegment === "apikey" ? (
+                              <MobileField
+                                label="状态"
+                                value={
+                                  <button
+                                    type="button"
+                                    className="sites-status-toggle"
+                                    onClick={() => handleToggleAccountStatus(a)}
+                                    disabled={
+                                      !!actionLoading[`status-toggle-${a.id}`]
+                                    }
+                                    data-testid={`account-status-toggle-${a.id}`}
+                                    title={
+                                      a.status === "disabled"
+                                        ? "点击启用"
+                                        : "点击禁用"
+                                    }
+                                    aria-label={
+                                      a.status === "disabled"
+                                        ? "点击启用"
+                                        : "点击禁用"
+                                    }
+                                  >
+                                    {actionLoading[`status-toggle-${a.id}`] ? (
+                                      <span className="spinner spinner-sm" />
+                                    ) : (
+                                      <span
+                                        className={`badge ${a.status === "disabled" ? "badge-muted" : "badge-success"}`}
+                                        style={{
+                                          fontSize: 13,
+                                          fontWeight: 700,
+                                          padding: "6px 14px",
+                                          borderRadius: 999,
+                                          minWidth: 56,
+                                          justifyContent: "center",
+                                        }}
+                                      >
+                                        {a.status === "disabled" ? "启用" : "禁用"}
+                                      </span>
+                                    )}
+                                  </button>
+                                }
+                              />
+                            ) : null}
                             <MobileField
                               label="提示"
                               stacked
@@ -3090,18 +3588,29 @@ export default function Accounts() {
                       <th style={{ width: 44 }}>
                         <input
                           type="checkbox"
-                          checked={allVisibleAccountsSelected}
+                          checked={allDisplayedAccountsSelected}
                           onChange={(e) =>
                             toggleSelectAllVisibleAccounts(e.target.checked)
                           }
                         />
                       </th>
-                      <th>连接名称</th>
-                      <th>站点</th>
+                      {activeSegment === "apikey" ? (
+                        <>
+                          <th style={{ width: "11%" }}>站点</th>
+                          <th style={{ width: "12%" }}>连接名称</th>
+                          <th style={{ width: "8%" }}>状态</th>
+                        </>
+                      ) : (
+                        <>
+                          <th style={{ width: "12%" }}>连接名称</th>
+                          <th>站点</th>
+                        </>
+                      )}
                       <th>运行健康状态</th>
+                      <th style={{ width: "22%" }}>启用模型</th>
                       <th>余额</th>
                       <th>已用</th>
-                      <th>签到</th>
+                      <th style={{ width: 72 }}>签到</th>
                       <th
                         className="accounts-actions-col"
                         style={{ textAlign: "right" }}
@@ -3111,7 +3620,7 @@ export default function Accounts() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleAccounts.map((a: any, i: number) => {
+                    {displayedAccounts.map((a: any, i: number) => {
                       const capabilities = resolveAccountCapabilities(a);
                       const connectionMode = resolveAccountCredentialMode(a);
                       return (
@@ -3137,38 +3646,132 @@ export default function Accounts() {
                               }
                             />
                           </td>
-                          <td style={{ color: "var(--color-text-primary)" }}>
-                            <div style={{ fontWeight: 600 }}>
-                              {resolveAccountDisplayName(a)}
-                            </div>
-                            <div
-                              style={{ display: "flex", gap: 4, marginTop: 4 }}
-                            >
-                              <span
-                                className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
-                                style={{ fontSize: 10 }}
-                              >
-                                {connectionMode === "apikey"
-                                  ? "API Key"
-                                  : "Session"}
-                              </span>
-                              {parseAccountExtraConfig(a)?.proxyUrl && (
-                                <span
-                                  className="badge badge-purple"
-                                  style={{ fontSize: 10 }}
+                          {activeSegment === "apikey" ? (
+                            <>
+                              <td>
+                                <SiteBadgeLink
+                                  siteId={a.site?.id}
+                                  siteName={a.site?.name}
+                                  badgeClassName="badge accounts-site-highlight"
+                                />
+                              </td>
+                              <td style={{ color: "var(--color-text-primary)" }}>
+                                <div
+                                  style={{
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                  data-tooltip={resolveAccountDisplayName(a)}
                                 >
-                                  代理
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td>
-                            <SiteBadgeLink
-                              siteId={a.site?.id}
-                              siteName={a.site?.name}
-                              badgeStyle={{ fontSize: 11 }}
-                            />
-                          </td>
+                                  {resolveAccountDisplayName(a)}
+                                </div>
+                                <div
+                                  style={{ display: "flex", gap: 4, marginTop: 4 }}
+                                >
+                                  <span
+                                    className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
+                                    style={{ fontSize: 10 }}
+                                  >
+                                    {connectionMode === "apikey"
+                                      ? "API Key"
+                                      : "Session"}
+                                  </span>
+                                  {parseAccountExtraConfig(a)?.proxyUrl && (
+                                    <span
+                                      className="badge badge-purple"
+                                      style={{ fontSize: 10 }}
+                                    >
+                                      代理
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="sites-status-toggle"
+                                  onClick={() => handleToggleAccountStatus(a)}
+                                  disabled={
+                                    !!actionLoading[`status-toggle-${a.id}`]
+                                  }
+                                  data-testid={`account-status-toggle-${a.id}`}
+                                  title={
+                                    a.status === "disabled"
+                                      ? "点击启用"
+                                      : "点击禁用"
+                                  }
+                                  aria-label={
+                                    a.status === "disabled"
+                                      ? "点击启用"
+                                      : "点击禁用"
+                                  }
+                                >
+                                  {actionLoading[`status-toggle-${a.id}`] ? (
+                                    <span className="spinner spinner-sm" />
+                                  ) : (
+                                    <span
+                                      className={`badge ${a.status === "disabled" ? "badge-muted" : "badge-success"}`}
+                                      style={{
+                                        fontSize: 13,
+                                        fontWeight: 700,
+                                        padding: "6px 14px",
+                                        borderRadius: 999,
+                                        minWidth: 56,
+                                        justifyContent: "center",
+                                      }}
+                                    >
+                                      {a.status === "disabled" ? "启用" : "禁用"}
+                                    </span>
+                                  )}
+                                </button>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td style={{ color: "var(--color-text-primary)" }}>
+                                <div
+                                  style={{
+                                    fontWeight: 600,
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                  }}
+                                  data-tooltip={resolveAccountDisplayName(a)}
+                                >
+                                  {resolveAccountDisplayName(a)}
+                                </div>
+                                <div
+                                  style={{ display: "flex", gap: 4, marginTop: 4 }}
+                                >
+                                  <span
+                                    className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
+                                    style={{ fontSize: 10 }}
+                                  >
+                                    {connectionMode === "apikey"
+                                      ? "API Key"
+                                      : "Session"}
+                                  </span>
+                                  {parseAccountExtraConfig(a)?.proxyUrl && (
+                                    <span
+                                      className="badge badge-purple"
+                                      style={{ fontSize: 10 }}
+                                    >
+                                      代理
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <SiteBadgeLink
+                                  siteId={a.site?.id}
+                                  siteName={a.site?.name}
+                                  badgeStyle={{ fontSize: 11 }}
+                                />
+                              </td>
+                            </>
+                          )}
                           <td>
                             {(() => {
                               const health = resolveRuntimeHealth(a);
@@ -3212,6 +3815,11 @@ export default function Accounts() {
                                 </div>
                               );
                             })()}
+                          </td>
+                          <td>
+                            <EnabledModelsSummary
+                              models={a.enabledModels || []}
+                            />
                           </td>
                           <td style={{ fontVariantNumeric: "tabular-nums" }}>
                             <div
@@ -3286,7 +3894,7 @@ export default function Accounts() {
                             ) : (
                               <span
                                 className="badge badge-muted"
-                                style={{ fontSize: 11 }}
+                                style={{ fontSize: 11, whiteSpace: "nowrap" }}
                               >
                                 不支持
                               </span>
@@ -3452,6 +4060,7 @@ export default function Accounts() {
                 </div>
               </div>
             )}
+            {apiKeyPagination}
           </div>
         </>
       )}

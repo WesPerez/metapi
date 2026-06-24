@@ -5,6 +5,10 @@ on:
     - cron: "17 1 * * *"   # 每日 UTC 01:17（北京时间 09:17）
   workflow_dispatch:
 
+concurrency:
+  group: sync-upstream-mine
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -14,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout fork (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -27,14 +31,18 @@ jobs:
       - name: Add upstream
         run: |
           git remote add upstream https://github.com/cita-777/metapi.git
-          git fetch upstream --tags
+          git fetch origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/mine:refs/remotes/origin/mine
+          git fetch --tags upstream \
+            +refs/heads/main:refs/remotes/upstream/main
 
-      - name: Fast-forward main to upstream/main
+      - name: Merge upstream/main into fork main
         id: ff
         run: |
-          git checkout main
+          git checkout -B main origin/main
           BEFORE=$(git rev-parse HEAD)
-          if git merge --ff-only upstream/main; then
+          if git merge --no-edit upstream/main; then
             AFTER=$(git rev-parse HEAD)
             if [ "$BEFORE" != "$AFTER" ]; then
               git push origin main
@@ -43,7 +51,7 @@ jobs:
               echo "changed=false" >> "$GITHUB_OUTPUT"
             fi
           else
-            echo "main has diverged from upstream/main; manual intervention required" >&2
+            echo "origin/main could not merge upstream/main automatically; manual intervention required" >&2
             exit 1
           fi
 

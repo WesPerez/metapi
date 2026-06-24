@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Configure git identity
         run: |
@@ -76,7 +76,7 @@ jobs:
       - name: Open or update PR (clean merge)
         if: steps.ff.outputs.changed == 'true' && steps.prep.outputs.conflict == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           if gh pr view sync/upstream-main --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "PR already exists, branch updated."
@@ -92,7 +92,7 @@ jobs:
       - name: Open conflict report PR (manual merge needed)
         if: steps.ff.outputs.changed == 'true' && steps.prep.outputs.conflict == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           git checkout -B sync/upstream-main-conflicts origin/mine
           # Empty marker commit so a PR can be opened to track the conflict.

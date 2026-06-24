@@ -1,0 +1,126 @@
+name: Sync upstream (mine)
+
+on:
+  schedule:
+    - cron: "17 1 * * *"   # 每日 UTC 01:17（北京时间 09:17）
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream-mine
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork (full history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/cita-777/metapi.git
+          git fetch origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/mine:refs/remotes/origin/mine
+          git fetch --tags upstream \
+            +refs/heads/main:refs/remotes/upstream/main
+
+      - name: Apply upstream/main to fork main
+        id: ff
+        run: |
+          git checkout -B main origin/main
+          STATE_FILE=".github/upstream-main.sha"
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+
+          if [ -f "$STATE_FILE" ]; then
+            BASE=$(cat "$STATE_FILE")
+          else
+            BASE=$(git merge-base origin/main upstream/main)
+          fi
+
+          if [ "$BASE" = "$UPSTREAM_SHA" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --binary "$BASE" "$UPSTREAM_SHA" -- . ':(exclude).github/workflows/**' > upstream.patch
+          if [ -s upstream.patch ]; then
+            git apply --3way --index upstream.patch
+          fi
+
+          echo "$UPSTREAM_SHA" > "$STATE_FILE"
+          git add "$STATE_FILE"
+
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "chore(sync): apply upstream/main $(git rev-parse --short "$UPSTREAM_SHA")"
+          git push origin main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare sync branch for mine
+        if: steps.ff.outputs.changed == 'true'
+        id: prep
+        run: |
+          git fetch origin mine
+          git checkout -B sync/upstream-main origin/mine
+          if git merge --no-edit main; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            echo "conflict=true"  >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push sync branch (clean merge)
+        if: steps.ff.outputs.changed == 'true' && steps.prep.outputs.conflict == 'false'
+        run: git push origin sync/upstream-main --force
+
+      - name: Open or update PR (clean merge)
+        if: steps.ff.outputs.changed == 'true' && steps.prep.outputs.conflict == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view sync/upstream-main --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "PR already exists, branch updated."
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base mine \
+              --head sync/upstream-main \
+              --title "chore(sync): merge upstream/main into mine" \
+              --body "Automated daily sync from upstream/main. Review and merge to bring official updates into mine."
+          fi
+
+      - name: Open conflict report PR (manual merge needed)
+        if: steps.ff.outputs.changed == 'true' && steps.prep.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout -B sync/upstream-main-conflicts origin/mine
+          # Empty marker commit so a PR can be opened to track the conflict.
+          git commit --allow-empty -m "chore(sync): upstream/main has conflicts with mine (manual merge needed)"
+          git push origin sync/upstream-main-conflicts --force
+          if gh pr view sync/upstream-main-conflicts --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Conflict PR already exists."
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base mine \
+              --head sync/upstream-main-conflicts \
+              --title "chore(sync): upstream/main conflicts with mine — manual merge required" \
+              --body "Automatic merge of upstream/main into mine failed. Please run locally:\n\n\`\`\`\ngit fetch upstream\ngit checkout mine\ngit merge main\n# resolve conflicts, then\ngit push origin mine\n\`\`\`"
+          fi

@@ -1,0 +1,62 @@
+name: Sync fork branches
+
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-fork-branches
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch branches
+        run: |
+          git remote add upstream https://github.com/cita-777/metapi.git
+          git fetch origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/mine:refs/remotes/origin/mine
+          git fetch upstream +refs/heads/main:refs/remotes/upstream/main
+
+      - name: Keep main identical to upstream/main
+        run: |
+          set -euo pipefail
+          git push origin refs/remotes/upstream/main:refs/heads/main --force-with-lease
+
+      - name: Rebase mine on synced main
+        id: rebase
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          git checkout -B mine origin/mine
+          git rebase upstream/main
+          git push origin mine --force-with-lease
+
+      - name: Report mine rebase conflict
+        if: steps.rebase.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "sync: mine rebase on upstream/main failed" \
+            --body "The scheduled sync kept main aligned with upstream/main, but mine could not be rebased automatically. Please rebase mine on upstream/main locally, resolve conflicts, and force-push mine."
+          exit 1

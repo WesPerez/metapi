@@ -31,6 +31,21 @@ function collectText(node: ReactTestInstance): string {
     .join('');
 }
 
+function createApiKeyAccount(id: number, siteId: number, siteName: string, name = `key-${id}`) {
+  return {
+    id,
+    siteId,
+    username: name,
+    accessToken: '',
+    apiToken: `sk-${id}`,
+    status: 'active',
+    credentialMode: 'apikey',
+    capabilities: { canCheckin: false, canRefreshBalance: false, proxyOnly: true },
+    enabledModels: ['gpt-4o'],
+    site: { id: siteId, name: siteName, platform: 'new-api', status: 'active', url: `https://${siteName.toLowerCase()}.example.com` },
+  };
+}
+
 describe('Accounts segmented connections view', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,6 +76,7 @@ describe('Accounts segmented connections view', () => {
         status: 'active',
         credentialMode: 'apikey',
         capabilities: { canCheckin: false, canRefreshBalance: false, proxyOnly: true },
+        enabledModels: ['gpt-4o', 'claude-sonnet'],
         site: { id: 11, name: 'Key Site', platform: 'new-api', status: 'active', url: 'https://key.example.com' },
       },
     ]);
@@ -92,6 +108,9 @@ describe('Accounts segmented connections view', () => {
       expect(rendered).toContain('只有 Base URL + Key 时使用，只负责代理调用');
       expect(rendered).toContain('从账号同步或手动维护，供路由实际调用');
       expect(rendered).toContain('Key Site');
+      expect(rendered).toContain('启用模型');
+      expect(rendered).toContain('gpt-4o');
+      expect(rendered).toContain('claude-sonnet');
       expect(rendered).not.toContain('仅代理');
       expect(rendered).not.toContain('session-user');
 
@@ -136,6 +155,92 @@ describe('Accounts segmented connections view', () => {
       expect(rendered).toContain('暂无 Session 连接');
       expect(rendered).toContain('请为现有站点添加 Session 连接');
       expect(rendered).not.toContain('请先添加站点');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('paginates apikey connections and shows only the current page by default', async () => {
+    apiMock.getAccounts.mockResolvedValue(
+      Array.from({ length: 16 }, (_, index) => (
+        createApiKeyAccount(index + 1, 20, 'Bulk Site', `bulk-key-${String(index + 1).padStart(2, '0')}`)
+      )),
+    );
+    apiMock.getSites.mockResolvedValue([
+      { id: 20, name: 'Bulk Site', platform: 'new-api', status: 'active' },
+    ]);
+    apiMock.getAccountTokens.mockResolvedValue([]);
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts?segment=apikey']}>
+            <ToastProvider>
+              <Accounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      let rowIds = root.root
+        .findAll((node) => typeof node.props['data-testid'] === 'string' && node.props['data-testid'].startsWith('account-row-'))
+        .map((node) => node.props['data-testid']);
+      expect(rowIds).toHaveLength(15);
+      expect(rowIds).toContain('account-row-15');
+      expect(rowIds).not.toContain('account-row-16');
+      expect(collectText(root.root)).toContain('显示第 1 - 15 条，共 16 条');
+
+      const nextButton = root.root
+        .findAll((node) => node.type === 'button' && collectText(node) === '下一页')
+        .at(-1);
+      expect(nextButton).toBeTruthy();
+      await act(async () => {
+        nextButton!.props.onClick();
+      });
+      await flushMicrotasks();
+
+      rowIds = root.root
+        .findAll((node) => typeof node.props['data-testid'] === 'string' && node.props['data-testid'].startsWith('account-row-'))
+        .map((node) => node.props['data-testid']);
+      expect(rowIds).toEqual(['account-row-16']);
+      expect(collectText(root.root)).toContain('显示第 16 - 16 条，共 16 条');
+    } finally {
+      root?.unmount();
+    }
+  });
+
+  it('keeps apikey connections from the same site adjacent in the visible order', async () => {
+    apiMock.getAccounts.mockResolvedValue([
+      createApiKeyAccount(1, 10, 'Alpha Site', 'alpha-a'),
+      createApiKeyAccount(2, 20, 'Beta Site', 'beta-a'),
+      createApiKeyAccount(3, 10, 'Alpha Site', 'alpha-b'),
+      createApiKeyAccount(4, 20, 'Beta Site', 'beta-b'),
+    ]);
+    apiMock.getSites.mockResolvedValue([
+      { id: 10, name: 'Alpha Site', platform: 'new-api', status: 'active' },
+      { id: 20, name: 'Beta Site', platform: 'new-api', status: 'active' },
+    ]);
+    apiMock.getAccountTokens.mockResolvedValue([]);
+
+    let root!: WebTestRenderer;
+    try {
+      await act(async () => {
+        root = create(
+          <MemoryRouter initialEntries={['/accounts?segment=apikey']}>
+            <ToastProvider>
+              <Accounts />
+            </ToastProvider>
+          </MemoryRouter>,
+        );
+      });
+      await flushMicrotasks();
+
+      const rowIds = root.root
+        .findAll((node) => typeof node.props['data-testid'] === 'string' && node.props['data-testid'].startsWith('account-row-'))
+        .map((node) => node.props['data-testid']);
+      expect(rowIds).toEqual(['account-row-1', 'account-row-3', 'account-row-2', 'account-row-4']);
     } finally {
       root?.unmount();
     }

@@ -19,6 +19,7 @@ import { getSiteInitializationPreset } from '../../../shared/siteInitializationP
 import { normalizeSiteApiEndpointBaseUrl } from '../../services/siteApiEndpointService.js';
 import { analyzePrimarySiteUrl } from '../../../shared/sitePrimaryUrl.js';
 import { probeSiteModels } from '../../services/modelService.js';
+import { getEnabledModelsBySite } from '../../services/enabledModelsSummaryService.js';
 
 function sseWrite(raw: import('http').ServerResponse, event: string, data: unknown) {
   try { raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignore */ }
@@ -437,6 +438,7 @@ export async function sitesRoutes(app: FastifyInstance) {
   app.get('/api/sites', async () => {
     const siteRows = await db.select().from(schema.sites).all();
     const siteRowsWithApiEndpoints = await attachSiteApiEndpoints(siteRows);
+    const enabledModelsBySite = await getEnabledModelsBySite(siteRows.map((site) => site.id));
     const accountRows = await db.select({
       siteId: schema.accounts.siteId,
       balance: schema.accounts.balance,
@@ -454,6 +456,7 @@ export async function sitesRoutes(app: FastifyInstance) {
       ...site,
       totalBalance: Math.round((totalBalanceBySiteId[site.id] || 0) * 1_000_000) / 1_000_000,
       subscriptionSummary: subscriptionBySiteId[site.id] || null,
+      enabledModels: enabledModelsBySite.get(site.id) || [],
     }));
   });
 
@@ -867,35 +870,8 @@ export async function sitesRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'Site not found' });
     }
 
-    // Get models from model_availability (account-level)
-    const accountModels = await db.select({ modelName: schema.modelAvailability.modelName })
-      .from(schema.modelAvailability)
-      .innerJoin(schema.accounts, eq(schema.modelAvailability.accountId, schema.accounts.id))
-      .where(
-        and(
-          eq(schema.accounts.siteId, id),
-          eq(schema.modelAvailability.available, true),
-        ),
-      )
-      .all();
-
-    // Get models from token_model_availability (token-level)
-    const tokenModels = await db.select({ modelName: schema.tokenModelAvailability.modelName })
-      .from(schema.tokenModelAvailability)
-      .innerJoin(schema.accountTokens, eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id))
-      .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-      .where(
-        and(
-          eq(schema.accounts.siteId, id),
-          eq(schema.tokenModelAvailability.available, true),
-        ),
-      )
-      .all();
-
-    const models = Array.from(new Set([
-      ...accountModels.map((r) => r.modelName.trim()),
-      ...tokenModels.map((r) => r.modelName.trim()),
-    ])).filter((m) => m.length > 0).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    const enabledModelsBySite = await getEnabledModelsBySite([id]);
+    const models = enabledModelsBySite.get(id) || [];
 
     return { siteId: id, models };
   });

@@ -489,6 +489,8 @@ export default function DownstreamKeys() {
     tagOperation: 'keep',
     tags: [],
   });
+  const [downstreamPage, setDownstreamPage] = useState(1);
+  const [downstreamPageSize, setDownstreamPageSize] = useState(15);
   const isMobile = useIsMobile();
 
   const load = async () => {
@@ -683,14 +685,43 @@ export default function DownstreamKeys() {
     ].join(' ');
     return searchMatcher(haystack);
   }).sort((a, b) => {
+    // 首先按启用状态排序
     if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+
+    // 提取站点列表（从siteWeightMultipliers获取所有站点ID，排序后作为字符串比较）
+    const getSiteKey = (item: ManagedItem) => {
+      const siteIds = Object.keys(item.siteWeightMultipliers || {}).map(Number).filter(id => !isNaN(id));
+      if (siteIds.length === 0) return 'zzz'; // 无站点的排到最后
+      return siteIds.sort((x, y) => x - y).join(',');
+    };
+
+    const siteKeyA = getSiteKey(a);
+    const siteKeyB = getSiteKey(b);
+
+    // 按站点组合排序，使同站点相邻
+    if (siteKeyA !== siteKeyB) return siteKeyA.localeCompare(siteKeyB);
+
+    // 同站点内按最近使用时间排序
     const lastA = a.lastUsedAt ? Date.parse(a.lastUsedAt) : 0;
     const lastB = b.lastUsedAt ? Date.parse(b.lastUsedAt) : 0;
     if (lastA !== lastB) return lastB - lastA;
+
+    // 最后按名称排序
     return a.name.localeCompare(b.name);
   }), [activeTagFilters, groupFilter, managedItems, routeMap, searchMatcher, status, tagMatchMode]);
 
+  useEffect(() => {
+    setDownstreamPage(1);
+  }, [status, groupFilter, activeTagFilters, searchMatcher, tagMatchMode]);
+
   const visibleIds = useMemo(() => visibleItems.map((item) => item.id), [visibleItems]);
+  const totalDownstreamCount = visibleItems.length;
+  const downstreamTotalPages = Math.ceil(totalDownstreamCount / downstreamPageSize);
+  const paginatedItems = useMemo(() => {
+    const startIndex = (downstreamPage - 1) * downstreamPageSize;
+    const endIndex = startIndex + downstreamPageSize;
+    return visibleItems.slice(startIndex, endIndex);
+  }, [visibleItems, downstreamPage, downstreamPageSize]);
   const selectedVisibleCount = useMemo(() => selectedIds.filter((id) => visibleIds.includes(id)).length, [selectedIds, visibleIds]);
   const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
 
@@ -1134,7 +1165,7 @@ export default function DownstreamKeys() {
           </div>
         ) : isMobile ? (
           <div className="mobile-card-list">
-            {visibleItems.map((row) => {
+            {paginatedItems.map((row) => {
               const loadingToggle = !!rowLoading[`toggle-${row.id}`];
               const loadingReset = !!rowLoading[`reset-${row.id}`];
               const loadingDelete = !!rowLoading[`delete-${row.id}`];
@@ -1204,7 +1235,7 @@ export default function DownstreamKeys() {
                 </tr>
               </thead>
               <tbody>
-                {visibleItems.map((row) => {
+                {paginatedItems.map((row) => {
                   const loadingToggle = !!rowLoading[`toggle-${row.id}`];
                   const loadingReset = !!rowLoading[`reset-${row.id}`];
                   const loadingDelete = !!rowLoading[`delete-${row.id}`];
@@ -1267,6 +1298,78 @@ export default function DownstreamKeys() {
           </div>
         )}
       </div>
+
+      {visibleItems.length > 0 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '12px 16px',
+          gap: 12,
+          flexWrap: 'wrap',
+          background: 'var(--color-bg-card)',
+          borderRadius: 'var(--radius-md)',
+        }}>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+            显示第 {(downstreamPage - 1) * downstreamPageSize + 1} - {Math.min(downstreamPage * downstreamPageSize, totalDownstreamCount)} 条，共 {totalDownstreamCount} 条
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setDownstreamPage(1)}
+              disabled={downstreamPage === 1}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              首页
+            </button>
+            <button
+              onClick={() => setDownstreamPage(p => Math.max(1, p - 1))}
+              disabled={downstreamPage === 1}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              上一页
+            </button>
+            <span style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>
+              {downstreamPage} / {downstreamTotalPages}
+            </span>
+            <button
+              onClick={() => setDownstreamPage(p => Math.min(downstreamTotalPages, p + 1))}
+              disabled={downstreamPage === downstreamTotalPages}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              下一页
+            </button>
+            <button
+              onClick={() => setDownstreamPage(downstreamTotalPages)}
+              disabled={downstreamPage === downstreamTotalPages}
+              className="btn btn-ghost"
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              末页
+            </button>
+            <select
+              value={downstreamPageSize}
+              onChange={(e) => { setDownstreamPageSize(Number(e.target.value)); setDownstreamPage(1); }}
+              style={{
+                padding: '6px 10px',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 13,
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-primary)',
+              }}
+            >
+              <option value={10}>10 条/页</option>
+              <option value={15}>15 条/页</option>
+              <option value={20}>20 条/页</option>
+              <option value={50}>50 条/页</option>
+              <option value={100}>100 条/页</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       <DownstreamKeyEditorModal
         open={editorOpen}

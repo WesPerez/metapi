@@ -17,6 +17,7 @@ import {
 } from "./snapshotCacheService.js";
 import { estimateRewardWithTodayIncomeFallback } from "./todayIncomeRewardService.js";
 import { createAdminSnapshotPersistence } from "./adminSnapshotStore.js";
+import { getEnabledModelsByAccount } from "./enabledModelsSummaryService.js";
 
 export type AccountCapabilities = {
   canCheckin: boolean;
@@ -28,6 +29,7 @@ export type AccountOverviewRow = typeof schema.accounts.$inferSelect & {
   site: typeof schema.sites.$inferSelect;
   credentialMode: AccountCredentialMode;
   capabilities: AccountCapabilities;
+  enabledModels: string[];
   todaySpend: number;
   todayReward: number;
   runtimeHealth: RuntimeHealthInfo;
@@ -111,7 +113,13 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
 
   const { localDay, startUtc, endUtc } = getLocalDayRangeUtc();
 
-  const [todaySpendRows, modelCountRows, todayCheckins] = await Promise.all([
+  const accountIds = rows.map((row) => row.accounts.id);
+  const [
+    todaySpendRows,
+    modelCountRows,
+    todayCheckins,
+    enabledModelsByAccount,
+  ] = await Promise.all([
     db
       .select({
         accountId: schema.proxyLogs.accountId,
@@ -150,6 +158,7 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
         ),
       )
       .all(),
+    getEnabledModelsByAccount(accountIds),
   ]);
 
   const spendByAccount: Record<number, number> = {};
@@ -189,6 +198,7 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
         site: row.sites,
         credentialMode,
         capabilities,
+        enabledModels: enabledModelsByAccount.get(row.accounts.id) || [],
         todaySpend:
           Math.round((spendByAccount[row.accounts.id] || 0) * 1_000_000) /
           1_000_000,

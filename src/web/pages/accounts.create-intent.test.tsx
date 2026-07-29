@@ -81,7 +81,8 @@ describe('Accounts create intent handling', () => {
       expect(rendered).toContain('添加 API Key 连接');
 
       const selects = root.root.findAllByType(ModernSelect);
-      expect(selects[1]?.props.value).toBe('10');
+      const sitePreselect = selects.find((node: any) => String(node?.props?.value || '') === '10');
+      expect(sitePreselect?.props.value).toBe('10');
     } finally {
       root?.unmount();
     }

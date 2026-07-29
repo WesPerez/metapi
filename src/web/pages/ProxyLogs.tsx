@@ -80,8 +80,8 @@ type StoredDebugPreviewPayload = {
   storedBytes?: number;
 };
 
-const PAGE_SIZES = [20, 50, 100];
-const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZES = [10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 10;
 const TRACE_TABLE_LIMIT = 20;
 const DEBUG_TRACE_PAGE_SIZE = 5;
 const PROXY_LOGS_DEBUG_TRACE_PANEL_STORAGE_KEY =
@@ -788,7 +788,7 @@ export default function ProxyLogs() {
   const [clientOptions, setClientOptions] = useState<ProxyLogClientOption[]>(
     [],
   );
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [showDebugSettingsModal, setShowDebugSettingsModal] = useState(false);
   const [debugPanelLoading, setDebugPanelLoading] = useState(false);
   const [debugPanelSaving, setDebugPanelSaving] = useState(false);
@@ -2014,7 +2014,7 @@ export default function ProxyLogs() {
   );
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column" }}>
       <div className="page-header" style={{ marginBottom: 16 }}>
         <div>
           <h2 className="page-title">{tr("使用日志")}</h2>
@@ -2118,6 +2118,7 @@ export default function ProxyLogs() {
       <div
         className="card"
         style={{
+          order: 30,
           marginBottom: 12,
           padding: 14,
           display: "flex",
@@ -2260,7 +2261,10 @@ export default function ProxyLogs() {
       <div
         className={`anim-collapse ${debugTracePanelExpanded ? "is-open" : ""}`.trim()}
         data-debug-trace-panel-body
-        style={{ marginBottom: debugTracePanelExpanded ? 12 : 0 }}
+        style={{
+          order: 31,
+          marginBottom: debugTracePanelExpanded ? 12 : 0,
+        }}
       >
         <div className="anim-collapse-inner">
           <div className="card" style={{ padding: 12, overflowX: "auto" }}>
@@ -2568,12 +2572,12 @@ export default function ProxyLogs() {
       )}
 
       {hasInvalidTimeRange && (
-        <div className="alert alert-error" style={{ marginBottom: 12 }}>
+        <div className="alert alert-error" style={{ order: 9, marginBottom: 12 }}>
           结束时间必须晚于开始时间
         </div>
       )}
 
-      <div className="card" style={{ overflowX: "auto" }}>
+      <div className="card" style={{ order: 10, overflowX: "auto" }}>
         {loading ? (
           <div
             style={{
@@ -2821,6 +2825,7 @@ export default function ProxyLogs() {
                 <th>时间</th>
                 <th>模型</th>
                 <th>站点</th>
+                <th>账号</th>
                 <th>客户端</th>
                 <th>{tr("状态")}</th>
                 <th style={{ textAlign: "center" }}>用时</th>
@@ -2981,6 +2986,14 @@ export default function ProxyLogs() {
                           color: "var(--color-text-secondary)",
                         }}
                       >
+                        {detail?.username || log.username || "-"}
+                      </td>
+                      <td
+                        style={{
+                          fontSize: 12,
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         {renderProxyLogClientCell(detailLog)}
                       </td>
                       <td>
@@ -3071,7 +3084,7 @@ export default function ProxyLogs() {
                     </tr>
                     {expanded === log.id && (
                       <tr style={{ background: "var(--color-bg)" }}>
-                        <td colSpan={11} style={{ padding: 0 }}>
+                        <td colSpan={12} style={{ padding: 0 }}>
                           <div className="anim-collapse is-open">
                             <div className="anim-collapse-inner">
                               <div
@@ -3516,7 +3529,7 @@ export default function ProxyLogs() {
       </div>
 
       {total > 0 && (
-        <div className="pagination">
+        <div className="pagination" style={{ order: 11 }}>
           <div
             style={{
               fontSize: 12,

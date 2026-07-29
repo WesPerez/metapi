@@ -82,7 +82,7 @@ function buildListResponse(overrides?: Partial<{
     ],
     total: 1,
     page: 1,
-    pageSize: 50,
+    pageSize: 10,
     summary: {
       totalCount: 12,
       successCount: 8,
@@ -266,7 +266,7 @@ describe('ProxyLogs server-driven page', () => {
       await flushMicrotasks();
 
       expect(apiMock.getProxyLogs).toHaveBeenCalledWith({
-        limit: 50,
+        limit: 10,
         offset: 0,
         status: 'all',
         search: '',
@@ -909,20 +909,20 @@ describe('ProxyLogs server-driven page', () => {
       await flushMicrotasks();
 
       expect(apiMock.getProxyLogs).toHaveBeenNthCalledWith(2, {
-        limit: 50,
+        limit: 10,
         offset: 0,
         status: 'failed',
         search: '',
       });
       expect(apiMock.getProxyLogs).toHaveBeenNthCalledWith(3, {
-        limit: 50,
+        limit: 10,
         offset: 0,
         status: 'failed',
         search: '',
         client: 'app:cherry_studio',
       });
       expect(apiMock.getProxyLogs).toHaveBeenLastCalledWith({
-        limit: 50,
+        limit: 10,
         offset: 0,
         status: 'failed',
         search: 'mini',
@@ -1054,7 +1054,7 @@ describe('ProxyLogs server-driven page', () => {
       const expectedFrom = new Date(2026, 2, 9, 8, 0).toISOString();
       const expectedTo = new Date(2026, 2, 9, 9, 0).toISOString();
       expect(apiMock.getProxyLogs).toHaveBeenCalledWith({
-        limit: 50,
+        limit: 10,
         offset: 0,
         status: 'all',
         search: '',

@@ -430,18 +430,37 @@ export async function refreshAllBalances() {
     .where(eq(schema.accounts.status, 'active'))
     .all();
 
+  const anyRouterSiteIds = new Set(
+    (await db
+      .select({ id: schema.sites.id, platform: schema.sites.platform })
+      .from(schema.sites)
+      .all())
+      .filter((site) => String(site.platform || '').toLowerCase() === 'anyrouter')
+      .map((site) => site.id),
+  );
+
   const results: Array<{ accountId: number; balance: number | null }> = [];
 
-  await Promise.all(
-    rows.map(async (account) => {
-      try {
-        const info = await refreshBalance(account.id);
-        results.push({ accountId: account.id, balance: info?.balance ?? null });
-      } catch {
-        results.push({ accountId: account.id, balance: null });
+  const refreshOne = async (account: typeof schema.accounts.$inferSelect) => {
+    try {
+      const info = await refreshBalance(account.id);
+      results.push({ accountId: account.id, balance: info?.balance ?? null });
+    } catch {
+      results.push({ accountId: account.id, balance: null });
+    }
+  };
+
+  const anyRouterAccounts = rows.filter((account) => anyRouterSiteIds.has(account.siteId));
+  const otherAccounts = rows.filter((account) => !anyRouterSiteIds.has(account.siteId));
+
+  await Promise.all([
+    Promise.all(otherAccounts.map(refreshOne)),
+    (async () => {
+      for (const account of anyRouterAccounts) {
+        await refreshOne(account);
       }
-    }),
-  );
+    })(),
+  ]);
 
   return results;
 }

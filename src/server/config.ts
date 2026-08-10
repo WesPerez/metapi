@@ -76,6 +76,10 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     geminiCliClientId: parseOptionalSecret(env.GEMINI_CLI_CLIENT_ID) || DEFAULT_GEMINI_CLI_CLIENT_ID,
     geminiCliClientSecret: parseOptionalSecret(env.GEMINI_CLI_CLIENT_SECRET) || DEFAULT_GEMINI_CLI_CLIENT_SECRET,
     systemProxyUrl: env.SYSTEM_PROXY_URL || '',
+    resinStickyProxyEndpoints: parseCsvList(env.RESIN_STICKY_PROXY_ENDPOINTS),
+    resinEgressGuardUrl: (env.RESIN_EGRESS_GUARD_URL || '').trim(),
+    resinEgressGuardTokenFile: (env.RESIN_EGRESS_GUARD_TOKEN_FILE || '').trim(),
+    resinEgressGuardTimeoutMs: Math.max(100, Math.min(5_000, Math.trunc(parseNumber(env.RESIN_EGRESS_GUARD_TIMEOUT_MS, 1_500)))),
     accountCredentialSecret: env.ACCOUNT_CREDENTIAL_SECRET || env.AUTH_TOKEN || 'change-me-admin-token',
     checkinCron: env.CHECKIN_CRON || '0 8 * * *',
     checkinScheduleMode: (env.CHECKIN_SCHEDULE_MODE || 'cron').trim().toLowerCase() === 'interval'

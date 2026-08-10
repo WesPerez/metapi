@@ -11,6 +11,7 @@ import { Agent as UndiciAgent, ProxyAgent } from 'undici';
 import { mergeHeadersWithSiteCustomHeaders } from './siteCustomHeaders.js';
 import { resolveProxyUrlFromExtraConfig } from './accountExtraConfig.js';
 import { stripTrailingSlashes } from './urlNormalization.js';
+import { withResinEgressFeedback } from './resinEgressFeedback.js';
 
 const SITE_PROXY_CACHE_TTL_MS = 3_000;
 const SUPPORTED_PROXY_PROTOCOLS = new Set([
@@ -169,9 +170,10 @@ function getDispatcherByProxyUrl(proxyUrl: string, skipCache = false): Dispatche
 
   try {
     const parsedProxyUrl = new URL(normalized);
-    const dispatcher = SOCKS_PROXY_PROTOCOLS.has(parsedProxyUrl.protocol.toLowerCase())
+    const baseDispatcher = SOCKS_PROXY_PROTOCOLS.has(parsedProxyUrl.protocol.toLowerCase())
       ? createSocksDispatcher(parsedProxyUrl)
       : new ProxyAgent(normalized);
+    const dispatcher = withResinEgressFeedback(baseDispatcher, normalized);
     if (!skipCache) {
       dispatcherCache.set(normalized, dispatcher);
     }

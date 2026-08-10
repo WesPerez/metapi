@@ -33,6 +33,7 @@ import { repairStoredCreatedAtValues } from './services/storedTimestampRepairSer
 import { migrateSiteApiKeysToAccounts } from './services/siteApiKeyMigrationService.js';
 import { ensureDefaultSitesSeeded } from './services/defaultSiteSeedService.js';
 import { ensureOauthIdentityBackfill } from './services/oauth/oauthIdentityBackfill.js';
+import { ensureAccountScopedResinProxyIdentityBackfill } from './services/resinProxyIdentityService.js';
 import { ensureOauthProviderSitesExist } from './services/oauth/oauthSiteRegistry.js';
 import { startOAuthLoopbackCallbackServers, stopOAuthLoopbackCallbackServers } from './services/oauth/localCallbackServer.js';
 import { startSiteAnnouncementPolling, stopSiteAnnouncementPolling } from './services/siteAnnouncementPollingService.js';
@@ -190,6 +191,10 @@ try {
   await migrateSiteApiKeysToAccounts();
   await ensureDefaultSitesSeeded();
   await ensureOauthIdentityBackfill();
+  const resinProxyIdentityBackfillCount = await ensureAccountScopedResinProxyIdentityBackfill();
+  if (resinProxyIdentityBackfillCount > 0) {
+    console.log(`Backfilled ${resinProxyIdentityBackfillCount} account-scoped Resin proxy identities`);
+  }
   await routeRefreshWorkflow.rebuildRoutesOnly();
 
   console.log('Loaded runtime settings overrides');

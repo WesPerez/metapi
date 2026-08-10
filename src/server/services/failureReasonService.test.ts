@@ -21,6 +21,16 @@ describe('failureReasonService', () => {
     expect(result.category).toBe('network');
   });
 
+  it('classifies a Just a moment response as a Cloudflare challenge', () => {
+    const result = classifyFailureReason({
+      message: 'HTTP 403: Just a moment...',
+      status: 'failed',
+      httpStatus: 403,
+    });
+    expect(result.code).toBe('cloudflare_challenge');
+    expect(result.category).toBe('verification');
+  });
+
   it('classifies token errors using status and message', () => {
     const result = classifyFailureReason({
       message: 'invalid access token',

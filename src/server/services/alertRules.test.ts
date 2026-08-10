@@ -5,6 +5,7 @@ describe('alertRules', () => {
   it('detects cloudflare challenge messages', () => {
     expect(isCloudflareChallenge('Cloudflare challenge detected')).toBe(true);
     expect(isCloudflareChallenge('cf challenge required')).toBe(true);
+    expect(isCloudflareChallenge('HTTP 403: Just a moment...')).toBe(true);
     expect(isCloudflareChallenge('invalid token')).toBe(false);
   });
 

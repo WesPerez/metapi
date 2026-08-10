@@ -8,6 +8,7 @@ import {
   type ModelRefreshResult,
 } from './modelService.js';
 import * as routeRefreshWorkflow from './routeRefreshWorkflow.js';
+import { ensureAccountScopedResinProxyIdentity } from './resinProxyIdentityService.js';
 
 type UpstreamTokenLike = {
   name?: string | null;
@@ -64,6 +65,8 @@ export async function convergeAccountMutation(input: {
       return null;
     }
   };
+
+  await runStep(() => ensureAccountScopedResinProxyIdentity(input.accountId));
 
   if (input.ensurePreferredTokenBeforeSync && input.preferredApiToken?.trim()) {
     const defaultTokenId = await runStep(() => ensureDefaultTokenForAccount(

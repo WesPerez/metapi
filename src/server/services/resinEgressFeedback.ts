@@ -1,20 +1,45 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { Dispatcher } from 'undici';
+import { RetryAgent, type Dispatcher } from 'undici';
 import { config } from '../config.js';
 
 const BODY_PREFIX_LIMIT = 32 * 1024;
 const RESIN_PROXY_PROTOCOLS = new Set(['socks:', 'socks5:', 'socks5h:']);
 const TRANSPORT_CODES = new Set([
+  'EHOSTDOWN',
   'ECONNREFUSED',
   'ECONNRESET',
   'EHOSTUNREACH',
+  'ENETDOWN',
   'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
   'ETIMEDOUT',
   'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_SOCKET',
 ]);
+const TLS_CONFIGURATION_CODES = new Set([
+  'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+const RETRYABLE_METHODS: Dispatcher.HttpMethod[] = [
+  'GET',
+  'HEAD',
+  'OPTIONS',
+  'PUT',
+  'DELETE',
+  'TRACE',
+  'POST',
+  'PATCH',
+];
+const RETRY_READY_STATUSES = new Set(['deleted', 'lease_absent', 'stale_node']);
+const RESPONSE_STARTED = Symbol('metapi.resinResponseStarted');
+const FEEDBACK_STATUS = Symbol('metapi.resinFeedbackStatus');
 
 export type ResinProxyIdentity = {
   proxyHost: string;
@@ -25,8 +50,6 @@ export type ResinProxyIdentity = {
 
 type FeedbackKind =
   | 'cloudflare_challenge'
-  | 'gateway_502'
-  | 'gateway_504'
   | 'transport_connect'
   | 'transport_tls'
   | 'transport_timeout'
@@ -75,8 +98,6 @@ export function classifyResinResponseFailure(
   statusCode: number,
   bodyPrefix: string,
 ): FeedbackKind | null {
-  if (statusCode === 502) return 'gateway_502';
-  if (statusCode === 504) return 'gateway_504';
   if (statusCode !== 403) return null;
   const normalized = bodyPrefix.toLowerCase();
   if (
@@ -96,7 +117,16 @@ export function classifyResinTransportFailure(error: unknown): FeedbackKind | nu
   const message = `${value.message || ''} ${(value.cause as Error | undefined)?.message || ''}`.toLowerCase();
   const code = String(value.code || (value.cause as { code?: unknown } | undefined)?.code || '').toUpperCase();
   if (message.includes('abort') || message.includes('canceled') || message.includes('cancelled')) return null;
-  if (message.includes('tls') || message.includes('certificate') || message.includes('ssl')) return 'transport_tls';
+  if (
+    TLS_CONFIGURATION_CODES.has(code)
+    || message.includes('certificate has expired')
+    || message.includes('hostname/ip does not match certificate')
+    || message.includes('self-signed certificate')
+    || message.includes('unable to verify the first certificate')
+  ) {
+    return null;
+  }
+  if (message.includes('tls') || message.includes('ssl')) return 'transport_tls';
   if (code === 'ETIMEDOUT' || code.includes('TIMEOUT') || message.includes('timed out') || message.includes('timeout')) {
     return 'transport_timeout';
   }
@@ -107,6 +137,43 @@ export function classifyResinTransportFailure(error: unknown): FeedbackKind | nu
     return 'transport_connect';
   }
   return null;
+}
+
+type RecoveryTaggedError = Error & {
+  [RESPONSE_STARTED]?: boolean;
+  [FEEDBACK_STATUS]?: string;
+};
+
+function markRecoveryMetadata(error: Error, responseStarted: boolean, feedbackStatus: string): void {
+  try {
+    Object.defineProperties(error, {
+      [RESPONSE_STARTED]: {
+        configurable: true,
+        enumerable: false,
+        value: responseStarted,
+      },
+      [FEEDBACK_STATUS]: {
+        configurable: true,
+        enumerable: false,
+        value: feedbackStatus,
+      },
+    });
+  } catch {
+    // Frozen third-party errors simply remain ineligible for automatic replay.
+  }
+}
+
+export function shouldRetryResinTransportFailure(
+  error: unknown,
+  retryCounter: number,
+  feedbackStatus?: string,
+  responseStarted?: boolean,
+): boolean {
+  if (!(error instanceof Error) || retryCounter > 1) return false;
+  const tagged = error as RecoveryTaggedError;
+  if (responseStarted ?? tagged[RESPONSE_STARTED] ?? false) return false;
+  const status = feedbackStatus ?? tagged[FEEDBACK_STATUS] ?? '';
+  return RETRY_READY_STATUSES.has(status) && classifyResinTransportFailure(error) !== null;
 }
 
 function feedbackToken(): string {
@@ -135,16 +202,16 @@ async function emitFeedback(input: {
   kind: FeedbackKind;
   targetHost: string;
   statusCode?: number;
-}): Promise<void> {
+}): Promise<string> {
   const endpoint = config.resinEgressGuardUrl;
   const token = feedbackToken();
-  if (!endpoint || !token) return;
+  if (!endpoint || !token) return 'disabled';
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.resinEgressGuardTimeoutMs);
   timer.unref?.();
   try {
-    await fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -165,8 +232,17 @@ async function emitFeedback(input: {
       }),
       signal: controller.signal,
     });
+    const rawBody = await response.text();
+    if (!response.ok) return `http_${response.status}`;
+    try {
+      const payload = JSON.parse(rawBody) as { status?: unknown };
+      return typeof payload.status === 'string' ? payload.status : 'unknown';
+    } catch {
+      return 'invalid_response';
+    }
   } catch {
     // Feedback is best-effort; the original upstream result must still finish.
+    return 'unavailable';
   } finally {
     clearTimeout(timer);
   }
@@ -181,20 +257,28 @@ export function withResinEgressFeedback(
     return dispatcher;
   }
 
-  return dispatcher.compose((dispatch) => (options, handler) => {
+  const feedbackDispatcher = dispatcher.compose((dispatch) => (options, handler) => {
     let statusCode = 0;
+    let responseStarted = false;
     const chunks: Buffer[] = [];
     let capturedBytes = 0;
     const host = targetHost(options);
 
     return dispatch(options, {
       onConnect: (abort) => handler.onConnect?.(abort),
-      onResponseStarted: () => handler.onResponseStarted?.(),
+      onResponseStarted: () => {
+        responseStarted = true;
+        handler.onResponseStarted?.();
+      },
       onHeaders: (nextStatusCode, headers, resume, statusText) => {
-        if (nextStatusCode >= 200) statusCode = nextStatusCode;
+        if (nextStatusCode >= 200) {
+          statusCode = nextStatusCode;
+          responseStarted = true;
+        }
         return handler.onHeaders?.(nextStatusCode, headers, resume, statusText) ?? true;
       },
       onData: (chunk) => {
+        responseStarted = true;
         if (statusCode === 403 && capturedBytes < BODY_PREFIX_LIMIT) {
           const remaining = BODY_PREFIX_LIMIT - capturedBytes;
           const part = chunk.subarray(0, remaining);
@@ -217,12 +301,34 @@ export function withResinEgressFeedback(
       onError: (error) => {
         const kind = classifyResinTransportFailure(error);
         if (!kind) {
+          markRecoveryMetadata(error, responseStarted, 'not_eligible');
           handler.onError?.(error);
           return;
         }
         void emitFeedback({ identity, kind, targetHost: host })
-          .finally(() => handler.onError?.(error));
+          .then((feedbackStatus) => {
+            markRecoveryMetadata(error, responseStarted, feedbackStatus);
+            handler.onError?.(error);
+          });
       },
     });
+  });
+
+  return new RetryAgent(feedbackDispatcher, {
+    maxRetries: 1,
+    minTimeout: 0,
+    maxTimeout: 0,
+    timeoutFactor: 1,
+    retryAfter: false,
+    methods: RETRYABLE_METHODS,
+    statusCodes: [],
+    errorCodes: [...TRANSPORT_CODES],
+    retry: (error, context, callback) => {
+      if (!shouldRetryResinTransportFailure(error, context.state.counter)) {
+        callback(error);
+        return;
+      }
+      callback(null);
+    },
   });
 }

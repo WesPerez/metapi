@@ -30,7 +30,6 @@ const SOCKS_PROXY_PROTOCOLS = new Set([
   'socks5:',
   'socks5h:',
 ]);
-const DEFAULT_PROXY_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_PROXY_KEEPALIVE_INITIAL_DELAY_MS = 60_000;
 
 type SiteProxyRow = {
@@ -261,7 +260,7 @@ async function createSocksSocket(
       port: destinationPort,
     },
     command: 'connect',
-    timeout: DEFAULT_PROXY_CONNECT_TIMEOUT_MS,
+    timeout: config.resinEgressConnectTimeoutMs,
     socket_options: connectOptions.localAddress
       ? { localAddress: connectOptions.localAddress } as any
       : undefined,
@@ -280,24 +279,37 @@ async function createSocksSocket(
       ALPNProtocols: ['http/1.1'],
     });
 
-    const cleanup = (error: Error) => {
-      socket.destroy();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
       tlsSocket.destroy();
       reject(error);
     };
+    timer = setTimeout(() => {
+      fail(Object.assign(new Error('TLS handshake timeout'), { code: 'ETIMEDOUT' }));
+    }, config.resinEgressTlsHandshakeTimeoutMs);
+    timer.unref?.();
 
     tlsSocket.once('secureConnect', () => {
-      tlsSocket.off('error', cleanup);
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      tlsSocket.off('error', fail);
       applySocketDefaults(tlsSocket);
       resolve(tlsSocket);
     });
-    tlsSocket.once('error', cleanup);
+    tlsSocket.once('error', fail);
   });
 }
 
 function createSocksDispatcher(proxyUrl: URL): Dispatcher {
   const socksProxy = parseSocksProxyUrl(proxyUrl);
   return new UndiciAgent({
+    headersTimeout: config.resinEgressResponseHeaderTimeoutMs,
+    bodyTimeout: 0,
     connect: (connectOptions, callback) => {
       void createSocksSocket(connectOptions, socksProxy)
         .then((socket) => callback(null, socket))

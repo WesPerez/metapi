@@ -179,15 +179,19 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
 
   const accountProxyUrl = resolveProxyUrlFromExtraConfig(account.extraConfig);
   let activeAccessToken = account.accessToken;
-  let result = await withAccountProxyOverride(accountProxyUrl,
+  const runCheckin = () => withAccountProxyOverride(accountProxyUrl,
     () => adapter.checkin(site.url, activeAccessToken, platformUserId));
+  let result = await runCheckin();
+
+  if (!result.success && isCloudflareChallenge(result.message)) {
+    result = await runCheckin();
+  }
 
   if (!result.success && shouldAttemptAutoRelogin(result.message)) {
     const refreshedAccessToken = await tryAutoRelogin(account, site);
     if (refreshedAccessToken) {
       activeAccessToken = refreshedAccessToken;
-      result = await withAccountProxyOverride(accountProxyUrl,
-        () => adapter.checkin(site.url, activeAccessToken, platformUserId));
+      result = await runCheckin();
     }
   }
 

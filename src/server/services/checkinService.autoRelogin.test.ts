@@ -130,6 +130,36 @@ describe('checkinService auto relogin', () => {
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'fresh-token' }));
   });
 
+  it('retries the same account once after a Cloudflare challenge', async () => {
+    selectAllMock.mockReturnValue([
+      {
+        accounts: {
+          id: 21,
+          username: 'cloudflare-user',
+          accessToken: 'token',
+          status: 'active',
+          extraConfig: null,
+        },
+        sites: {
+          id: 21,
+          name: 'protected-site',
+          url: 'https://protected.example.com',
+          platform: 'new-api',
+        },
+      },
+    ]);
+    adapterMock.checkin
+      .mockResolvedValueOnce({ success: false, message: 'Cloudflare challenge: Just a moment' })
+      .mockResolvedValueOnce({ success: true, message: 'checked in' });
+
+    const { checkinAccount } = await import('./checkinService.js');
+    const result = await checkinAccount(21);
+
+    expect(result.success).toBe(true);
+    expect(adapterMock.checkin).toHaveBeenCalledTimes(2);
+    expect(adapterMock.login).not.toHaveBeenCalled();
+  });
+
   it('passes guessed platform user id when config does not include it', async () => {
     selectAllMock.mockReturnValue([
       {

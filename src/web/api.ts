@@ -908,7 +908,10 @@ export const api = {
   // Check-in
   triggerCheckinAll: () => request("/api/checkin/trigger", { method: "POST" }),
   triggerCheckin: (id: number) =>
-    request(`/api/checkin/trigger/${id}`, { method: "POST" }),
+    request(`/api/checkin/trigger/${id}`, {
+      method: "POST",
+      timeoutMs: 120_000,
+    }),
   getCheckinLogs: (params?: string) =>
     request(`/api/checkin/logs${params ? "?" + params : ""}`),
   updateCheckinSchedule: (cron: string) =>

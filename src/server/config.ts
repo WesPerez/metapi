@@ -80,6 +80,9 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     resinEgressGuardUrl: (env.RESIN_EGRESS_GUARD_URL || '').trim(),
     resinEgressGuardTokenFile: (env.RESIN_EGRESS_GUARD_TOKEN_FILE || '').trim(),
     resinEgressGuardTimeoutMs: Math.max(100, Math.min(5_000, Math.trunc(parseNumber(env.RESIN_EGRESS_GUARD_TIMEOUT_MS, 1_500)))),
+    resinEgressConnectTimeoutMs: Math.max(1_000, Math.min(60_000, Math.trunc(parseNumber(env.RESIN_EGRESS_CONNECT_TIMEOUT_MS, 10_000)))),
+    resinEgressTlsHandshakeTimeoutMs: Math.max(1_000, Math.min(60_000, Math.trunc(parseNumber(env.RESIN_EGRESS_TLS_HANDSHAKE_TIMEOUT_MS, 10_000)))),
+    resinEgressResponseHeaderTimeoutMs: Math.max(1_000, Math.min(600_000, Math.trunc(parseNumber(env.RESIN_EGRESS_RESPONSE_HEADER_TIMEOUT_MS, 120_000)))),
     accountCredentialSecret: env.ACCOUNT_CREDENTIAL_SECRET || env.AUTH_TOKEN || 'change-me-admin-token',
     checkinCron: env.CHECKIN_CRON || '0 8 * * *',
     checkinScheduleMode: (env.CHECKIN_SCHEDULE_MODE || 'cron').trim().toLowerCase() === 'interval'

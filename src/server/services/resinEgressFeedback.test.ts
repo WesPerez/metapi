@@ -3,6 +3,7 @@ import {
   classifyResinResponseFailure,
   classifyResinTransportFailure,
   parseResinProxyIdentity,
+  shouldRetryResinTransportFailure,
 } from './resinEgressFeedback.js';
 
 describe('resinEgressFeedback', () => {
@@ -25,10 +26,12 @@ describe('resinEgressFeedback', () => {
       .toBeNull();
   });
 
-  it('does not rotate for 401, 429, or 500', () => {
+  it('does not rotate for ordinary upstream status codes', () => {
     expect(classifyResinResponseFailure(401, '')).toBeNull();
     expect(classifyResinResponseFailure(429, '')).toBeNull();
     expect(classifyResinResponseFailure(500, '')).toBeNull();
+    expect(classifyResinResponseFailure(502, '')).toBeNull();
+    expect(classifyResinResponseFailure(504, '')).toBeNull();
   });
 
   it('classifies hard transport errors but excludes cancellation', () => {
@@ -37,5 +40,21 @@ describe('resinEgressFeedback', () => {
     expect(classifyResinTransportFailure(Object.assign(new Error('connection reset by peer'), { code: 'ECONNRESET' })))
       .toBe('transport_reset');
     expect(classifyResinTransportFailure(new Error('request aborted by caller'))).toBeNull();
+  });
+
+  it('does not rotate for an upstream certificate configuration error', () => {
+    expect(classifyResinTransportFailure(Object.assign(
+      new Error('hostname/IP does not match certificate altnames'),
+      { code: 'ERR_TLS_CERT_ALTNAME_INVALID' },
+    ))).toBeNull();
+  });
+
+  it('retries one pre-response transport failure after confirmed rotation', () => {
+    const error = Object.assign(new Error('connection reset by peer'), { code: 'ECONNRESET' });
+    expect(shouldRetryResinTransportFailure(error, 1, 'deleted')).toBe(true);
+    expect(shouldRetryResinTransportFailure(error, 2, 'deleted')).toBe(false);
+    expect(shouldRetryResinTransportFailure(error, 1, 'observe_only')).toBe(false);
+    expect(shouldRetryResinTransportFailure(error, 1, 'deleted', true)).toBe(false);
+    expect(shouldRetryResinTransportFailure(new Error('request aborted by caller'), 1, 'deleted')).toBe(false);
   });
 });

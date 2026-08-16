@@ -122,6 +122,29 @@ describe('api proxy test timeout handling', () => {
     expect(result.error.message).toBe('请求超时（120s）');
   });
 
+  it('keeps a single-account check-in alive past the default timeout', async () => {
+    installPendingFetch();
+
+    let settled = false;
+    const handled = api.triggerCheckin(116)
+      .then(() => ({ ok: true as const }))
+      .catch((error: Error) => ({ ok: false as const, error }))
+      .finally(() => {
+        settled = true;
+      });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    const result = await handled;
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('Expected single-account check-in to time out');
+    }
+    expect(result.error.message).toBe('请求超时（120s）');
+  });
+
   it('times out replay hydration file-content fetches after 30 seconds', async () => {
     installPendingFetch();
 

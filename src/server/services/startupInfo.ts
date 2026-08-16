@@ -32,8 +32,8 @@ export function buildStartupEndpoints(input: StartupSummaryInput): StartupEndpoi
     adminDashboardUrl: baseUrl,
     adminApiExample,
     proxyApiExample,
-    adminApiCurl: `curl '${adminApiExample}' -H 'Authorization: Bearer ${input.authToken}'`,
-    proxyApiCurl: `curl '${proxyApiExample}' -H 'Authorization: Bearer ${input.proxyToken}' -H 'Content-Type: application/json' -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}'`,
+    adminApiCurl: `curl '${adminApiExample}' -H 'Authorization: Bearer <admin-token>'`,
+    proxyApiCurl: `curl '${proxyApiExample}' -H 'Authorization: Bearer <proxy-token>' -H 'Content-Type: application/json' -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}'`,
   };
 }
 

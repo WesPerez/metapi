@@ -11,6 +11,22 @@ describe('buildConfig', () => {
     expect(config.dataDir).toBe('./data');
   });
 
+  it('uses bounded Resin recovery stage timeouts', () => {
+    const defaults = buildConfig({});
+    expect(defaults.resinEgressConnectTimeoutMs).toBe(10_000);
+    expect(defaults.resinEgressTlsHandshakeTimeoutMs).toBe(10_000);
+    expect(defaults.resinEgressResponseHeaderTimeoutMs).toBe(120_000);
+
+    const bounded = buildConfig({
+      RESIN_EGRESS_CONNECT_TIMEOUT_MS: '1',
+      RESIN_EGRESS_TLS_HANDSHAKE_TIMEOUT_MS: '999999',
+      RESIN_EGRESS_RESPONSE_HEADER_TIMEOUT_MS: '9999999',
+    });
+    expect(bounded.resinEgressConnectTimeoutMs).toBe(1_000);
+    expect(bounded.resinEgressTlsHandshakeTimeoutMs).toBe(60_000);
+    expect(bounded.resinEgressResponseHeaderTimeoutMs).toBe(600_000);
+  });
+
   it('aligns desktop deployments with server deployments for listen host', () => {
     const config = buildConfig({
       HOST: '0.0.0.0',

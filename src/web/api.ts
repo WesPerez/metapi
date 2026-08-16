@@ -910,7 +910,7 @@ export const api = {
   triggerCheckin: (id: number) =>
     request(`/api/checkin/trigger/${id}`, {
       method: "POST",
-      timeoutMs: 120_000,
+      timeoutMs: 390_000,
     }),
   getCheckinLogs: (params?: string) =>
     request(`/api/checkin/logs${params ? "?" + params : ""}`),

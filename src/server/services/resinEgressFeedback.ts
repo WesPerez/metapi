@@ -175,7 +175,7 @@ export function shouldRetryResinTransportFailure(
   feedbackStatus?: string,
   responseStarted?: boolean,
 ): boolean {
-  if (!(error instanceof Error) || retryCounter > 1) return false;
+  if (!(error instanceof Error) || retryCounter > 2) return false;
   const tagged = error as RecoveryTaggedError;
   if (responseStarted ?? tagged[RESPONSE_STARTED] ?? false) return false;
   const status = feedbackStatus ?? tagged[FEEDBACK_STATUS] ?? '';
@@ -337,7 +337,7 @@ export function withResinEgressFeedback(
   });
 
   return new RetryAgent(feedbackDispatcher, {
-    maxRetries: 1,
+    maxRetries: 2,
     minTimeout: 0,
     maxTimeout: 0,
     timeoutFactor: 1,

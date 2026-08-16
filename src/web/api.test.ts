@@ -136,13 +136,13 @@ describe('api proxy test timeout handling', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(settled).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(90_000);
+    await vi.advanceTimersByTimeAsync(360_000);
     const result = await handled;
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error('Expected single-account check-in to time out');
     }
-    expect(result.error.message).toBe('请求超时（120s）');
+    expect(result.error.message).toBe('请求超时（390s）');
   });
 
   it('times out replay hydration file-content fetches after 30 seconds', async () => {

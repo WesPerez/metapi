@@ -130,6 +130,66 @@ describe('checkinService auto relogin', () => {
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'fresh-token' }));
   });
 
+  it('retries transient gateway failures up to a successful response', async () => {
+    selectAllMock.mockReturnValue([
+      {
+        accounts: {
+          id: 31,
+          username: 'retry-user',
+          accessToken: 'token',
+          status: 'active',
+          extraConfig: null,
+        },
+        sites: {
+          id: 4,
+          name: 'retry-site',
+          url: 'https://retry.example.com',
+          platform: 'new-api',
+        },
+      },
+    ]);
+    adapterMock.checkin
+      .mockResolvedValueOnce({ success: false, message: 'HTTP 504: gateway timeout' })
+      .mockResolvedValueOnce({ success: false, message: 'HTTP 503: upstream unavailable' })
+      .mockResolvedValueOnce({ success: true, message: 'checked in' });
+    refreshBalanceMock.mockResolvedValue({ balance: 1 });
+
+    const { checkinAccount } = await import('./checkinService.js');
+    const result = await checkinAccount(31);
+
+    expect(result.success).toBe(true);
+    expect(adapterMock.checkin).toHaveBeenCalledTimes(3);
+    expect(adapterMock.login).not.toHaveBeenCalled();
+  });
+
+  it('does not replay a non-transient authentication failure before relogin policy', async () => {
+    selectAllMock.mockReturnValue([
+      {
+        accounts: {
+          id: 32,
+          username: 'auth-user',
+          accessToken: 'token',
+          status: 'active',
+          extraConfig: null,
+        },
+        sites: {
+          id: 5,
+          name: 'auth-site',
+          url: 'https://auth.example.com',
+          platform: 'new-api',
+        },
+      },
+    ]);
+    adapterMock.checkin.mockResolvedValue({ success: false, message: 'HTTP 401: unauthorized' });
+    decryptPasswordMock.mockReturnValue(null);
+
+    const { checkinAccount } = await import('./checkinService.js');
+    const result = await checkinAccount(32);
+
+    expect(result.success).toBe(false);
+    expect(adapterMock.checkin).toHaveBeenCalledTimes(1);
+  });
+
   it('retries the same account once after a Cloudflare challenge', async () => {
     selectAllMock.mockReturnValue([
       {

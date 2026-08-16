@@ -28,8 +28,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
 
-      - name: Test native Resin recovery
-        run: npx vitest run --root . src/server/services/resinEgressFeedback.test.ts
+      - name: Test Resin recovery and check-in retry
+        run: >-
+          npx vitest run --root .
+          src/server/services/resinEgressFeedback.test.ts
+          src/server/services/resinProxyIdentityService.test.ts
+          src/server/services/checkinService.autoRelogin.test.ts
+          src/web/api.test.ts
 
       - name: Typecheck server
         run: npm run typecheck:server

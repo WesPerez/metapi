@@ -18,8 +18,23 @@ import { decryptAccountPassword } from './accountCredentialService.js';
 import { setAccountRuntimeHealth } from './accountHealthService.js';
 import { formatUtcSqlDateTime } from './localTimeService.js';
 import { withAccountProxyOverride } from './siteProxy.js';
+import { buildNextAccountScopedResinProxyUrl } from './resinProxyIdentityService.js';
 
 type CheckinExecutionStatus = 'success' | 'failed' | 'skipped';
+const CHECKIN_MAX_ATTEMPTS = 3;
+
+export function isTransientCheckinFailureMessage(message?: string | null): boolean {
+  if (!message) return false;
+  if (isCloudflareChallenge(message)) return true;
+  const text = message.trim().toLowerCase();
+  if (!text) return false;
+  if (/\bhttp\s*(408|425|500|502|503|504|520|521|522|523|524|525|529)\b/.test(text)) return true;
+  return (
+    text.includes('gateway timeout')
+    || text.includes("unexpected token '<'")
+    || text.includes('is not valid json')
+  );
+}
 
 function isSiteDisabled(status?: string | null): boolean {
   return (status || 'active') === 'disabled';
@@ -177,21 +192,41 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
     : guessPlatformUserIdFromUsername(account.username);
   const platformUserId = resolvePlatformUserId(account.extraConfig, account.username);
 
-  const accountProxyUrl = resolveProxyUrlFromExtraConfig(account.extraConfig);
+  let accountProxyUrl = resolveProxyUrlFromExtraConfig(account.extraConfig);
+  let activeExtraConfig = account.extraConfig;
   let activeAccessToken = account.accessToken;
   const runCheckin = () => withAccountProxyOverride(accountProxyUrl,
     () => adapter.checkin(site.url, activeAccessToken, platformUserId));
-  let result = await runCheckin();
-
-  if (!result.success && isCloudflareChallenge(result.message)) {
-    result = await runCheckin();
-  }
+  const rotateResinIdentity = async () => {
+    const rotatedProxyUrl = buildNextAccountScopedResinProxyUrl(accountProxyUrl, account.id);
+    if (!rotatedProxyUrl || rotatedProxyUrl === accountProxyUrl) return;
+    activeExtraConfig = mergeAccountExtraConfig(activeExtraConfig, { proxyUrl: rotatedProxyUrl });
+    accountProxyUrl = rotatedProxyUrl;
+    account.extraConfig = activeExtraConfig;
+    await db.update(schema.accounts)
+      .set({
+        extraConfig: activeExtraConfig,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.accounts.id, account.id))
+      .run();
+  };
+  const runCheckinWithRecovery = async () => {
+    let latest = await runCheckin();
+    for (let attempt = 1; attempt < CHECKIN_MAX_ATTEMPTS; attempt += 1) {
+      if (latest.success || !isTransientCheckinFailureMessage(latest.message)) break;
+      await rotateResinIdentity();
+      latest = await runCheckin();
+    }
+    return latest;
+  };
+  let result = await runCheckinWithRecovery();
 
   if (!result.success && shouldAttemptAutoRelogin(result.message)) {
     const refreshedAccessToken = await tryAutoRelogin(account, site);
     if (refreshedAccessToken) {
       activeAccessToken = refreshedAccessToken;
-      result = await runCheckin();
+      result = await runCheckinWithRecovery();
     }
   }
 
@@ -229,7 +264,7 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
       updates.lastCheckinAt = new Date().toISOString();
     }
     if (!storedPlatformUserId && guessedPlatformUserId) {
-      updates.extraConfig = mergeAccountExtraConfig(account.extraConfig, {
+      updates.extraConfig = mergeAccountExtraConfig(activeExtraConfig, {
         platformUserId: guessedPlatformUserId,
       });
     }

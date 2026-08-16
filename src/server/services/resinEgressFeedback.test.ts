@@ -49,10 +49,11 @@ describe('resinEgressFeedback', () => {
     ))).toBeNull();
   });
 
-  it('retries one pre-response transport failure after confirmed rotation', () => {
+  it('retries two pre-response transport failures after confirmed rotation', () => {
     const error = Object.assign(new Error('connection reset by peer'), { code: 'ECONNRESET' });
     expect(shouldRetryResinTransportFailure(error, 1, 'deleted')).toBe(true);
-    expect(shouldRetryResinTransportFailure(error, 2, 'deleted')).toBe(false);
+    expect(shouldRetryResinTransportFailure(error, 2, 'deleted')).toBe(true);
+    expect(shouldRetryResinTransportFailure(error, 3, 'deleted')).toBe(false);
     expect(shouldRetryResinTransportFailure(error, 1, 'observe_only')).toBe(false);
     expect(shouldRetryResinTransportFailure(error, 1, 'deleted', true)).toBe(false);
     expect(shouldRetryResinTransportFailure(new Error('request aborted by caller'), 1, 'deleted')).toBe(false);
@@ -67,6 +68,7 @@ describe('resinEgressFeedback', () => {
     expect(shouldRetryResinTransportFailure(timeout, 1, 'native_resin')).toBe(true);
     expect(shouldRetryResinTransportFailure(tls, 1, 'native_resin')).toBe(false);
     expect(shouldRetryResinTransportFailure(reset, 1, 'native_resin', true)).toBe(false);
-    expect(shouldRetryResinTransportFailure(reset, 2, 'native_resin')).toBe(false);
+    expect(shouldRetryResinTransportFailure(reset, 2, 'native_resin')).toBe(true);
+    expect(shouldRetryResinTransportFailure(reset, 3, 'native_resin')).toBe(false);
   });
 });

@@ -38,6 +38,12 @@ const RETRYABLE_METHODS: Dispatcher.HttpMethod[] = [
   'PATCH',
 ];
 const RETRY_READY_STATUSES = new Set(['deleted', 'lease_absent', 'stale_node']);
+const NATIVE_RESIN_RETRY_STATUS = 'native_resin';
+const NATIVE_RESIN_RETRY_KINDS = new Set<FeedbackKind>([
+  'transport_connect',
+  'transport_timeout',
+  'transport_reset',
+]);
 const RESPONSE_STARTED = Symbol('metapi.resinResponseStarted');
 const FEEDBACK_STATUS = Symbol('metapi.resinFeedbackStatus');
 
@@ -173,7 +179,12 @@ export function shouldRetryResinTransportFailure(
   const tagged = error as RecoveryTaggedError;
   if (responseStarted ?? tagged[RESPONSE_STARTED] ?? false) return false;
   const status = feedbackStatus ?? tagged[FEEDBACK_STATUS] ?? '';
-  return RETRY_READY_STATUSES.has(status) && classifyResinTransportFailure(error) !== null;
+  const kind = classifyResinTransportFailure(error);
+  if (!kind) return false;
+  if (status === NATIVE_RESIN_RETRY_STATUS) {
+    return NATIVE_RESIN_RETRY_KINDS.has(kind);
+  }
+  return RETRY_READY_STATUSES.has(status);
 }
 
 function feedbackToken(): string {
@@ -253,9 +264,8 @@ export function withResinEgressFeedback(
   proxyUrl: string,
 ): Dispatcher {
   const identity = parseResinProxyIdentity(proxyUrl);
-  if (!identity || !config.resinEgressGuardUrl || !config.resinEgressGuardTokenFile) {
-    return dispatcher;
-  }
+  if (!identity) return dispatcher;
+  const feedbackEnabled = !!config.resinEgressGuardUrl && !!config.resinEgressGuardTokenFile;
 
   const feedbackDispatcher = dispatcher.compose((dispatch) => (options, handler) => {
     let statusCode = 0;
@@ -295,6 +305,10 @@ export function withResinEgressFeedback(
           handler.onComplete?.(trailers);
           return;
         }
+        if (!feedbackEnabled) {
+          handler.onComplete?.(trailers);
+          return;
+        }
         void emitFeedback({ identity, kind, targetHost: host, statusCode })
           .finally(() => handler.onComplete?.(trailers));
       },
@@ -302,6 +316,14 @@ export function withResinEgressFeedback(
         const kind = classifyResinTransportFailure(error);
         if (!kind) {
           markRecoveryMetadata(error, responseStarted, 'not_eligible');
+          handler.onError?.(error);
+          return;
+        }
+        if (!feedbackEnabled) {
+          const status = NATIVE_RESIN_RETRY_KINDS.has(kind)
+            ? NATIVE_RESIN_RETRY_STATUS
+            : 'not_eligible';
+          markRecoveryMetadata(error, responseStarted, status);
           handler.onError?.(error);
           return;
         }

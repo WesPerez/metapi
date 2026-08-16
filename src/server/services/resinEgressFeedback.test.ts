@@ -57,4 +57,16 @@ describe('resinEgressFeedback', () => {
     expect(shouldRetryResinTransportFailure(error, 1, 'deleted', true)).toBe(false);
     expect(shouldRetryResinTransportFailure(new Error('request aborted by caller'), 1, 'deleted')).toBe(false);
   });
+
+  it('uses native Resin recovery only for pre-response connect, timeout, and reset failures', () => {
+    const reset = Object.assign(new Error('connection reset by peer'), { code: 'ECONNRESET' });
+    const timeout = Object.assign(new Error('connect timeout'), { code: 'ETIMEDOUT' });
+    const tls = new Error('TLS handshake failed');
+
+    expect(shouldRetryResinTransportFailure(reset, 1, 'native_resin')).toBe(true);
+    expect(shouldRetryResinTransportFailure(timeout, 1, 'native_resin')).toBe(true);
+    expect(shouldRetryResinTransportFailure(tls, 1, 'native_resin')).toBe(false);
+    expect(shouldRetryResinTransportFailure(reset, 1, 'native_resin', true)).toBe(false);
+    expect(shouldRetryResinTransportFailure(reset, 2, 'native_resin')).toBe(false);
+  });
 });

@@ -177,16 +177,27 @@ export class AnyRouterAdapter extends NewApiAdapter {
       }
 
       try {
-        const checkin = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/checkin`, {
-          method: 'POST',
-          cookieHeader,
-          headers: this.buildUserHeaders(platformUserId),
-        });
-        return {
-          success: checkin?.success === true,
-          message: checkin?.message || firstMessage || 'checkin failed',
-          reward: checkin?.data?.reward?.toString(),
-        };
+      const checkin = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/checkin`, {
+        method: 'POST',
+        cookieHeader,
+        headers: this.buildUserHeaders(platformUserId),
+      });
+      let message = checkin?.message || firstMessage || '';
+      if (checkin?.success !== true && !message) {
+        try {
+          const self = await this.getSessionSelf(baseUrl, accessToken, platformUserId);
+          if (self?.success !== true && typeof self?.message === 'string') {
+            message = self.message;
+          }
+        } catch (error) {
+          message = error instanceof Error ? error.message : String(error || '');
+        }
+      }
+      return {
+        success: checkin?.success === true,
+        message: message || 'checkin failed',
+        reward: checkin?.data?.reward?.toString(),
+      };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error || '');
         return { success: false, message: message || firstMessage || 'checkin failed' };

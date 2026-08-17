@@ -33,6 +33,7 @@ jobs:
           npx vitest run --root .
           src/server/services/platforms/newApi.test.ts
           src/server/services/platforms/anyrouterCurl.test.ts
+          src/server/services/siteProxy.test.ts
           src/server/services/resinEgressFeedback.test.ts
           src/server/services/resinProxyIdentityService.test.ts
           src/server/services/checkinService.autoRelogin.test.ts

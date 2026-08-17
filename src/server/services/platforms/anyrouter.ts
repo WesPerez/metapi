@@ -1,4 +1,4 @@
-import type { ApiTokenInfo, BalanceInfo, TokenVerifyResult, UserInfo } from './base.js';
+import type { ApiTokenInfo, BalanceInfo, CheckinResult, TokenVerifyResult, UserInfo } from './base.js';
 import { NewApiAdapter } from './newApi.js';
 import {
   buildAnyRouterSessionCookieHeader,
@@ -147,6 +147,55 @@ export class AnyRouterAdapter extends NewApiAdapter {
       }
     }
     return super.getBalance(baseUrl, accessToken, platformUserId);
+  }
+
+  override async checkin(
+    baseUrl: string,
+    accessToken: string,
+    platformUserId?: number,
+  ): Promise<CheckinResult> {
+    if (!isAnyRouterSessionCredential(accessToken)) {
+      return super.checkin(baseUrl, accessToken, platformUserId);
+    }
+
+    const cookieHeader = buildAnyRouterSessionCookieHeader(accessToken);
+    let failureMessage = '';
+    try {
+      const signIn = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/sign_in`, {
+        method: 'POST',
+        body: '{}',
+        cookieHeader,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        useHelper: false,
+      });
+      if (signIn?.success) {
+        return {
+          success: true,
+          message: signIn.message || 'checked in',
+          reward: signIn.data?.reward?.toString(),
+        };
+      }
+      failureMessage = typeof signIn?.message === 'string' ? signIn.message : '';
+    } catch (error) {
+      failureMessage = error instanceof Error ? error.message : String(error || '');
+    }
+
+    try {
+      const checkin = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/checkin`, {
+        method: 'POST',
+        cookieHeader,
+        headers: this.buildUserHeaders(platformUserId),
+        useHelper: false,
+      });
+      return {
+        success: checkin?.success === true,
+        message: checkin?.message || failureMessage || 'checkin failed',
+        reward: checkin?.data?.reward?.toString(),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || '');
+      return { success: false, message: message || failureMessage || 'checkin failed' };
+    }
   }
 
   override async getApiTokens(

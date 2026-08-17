@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAnyRouterSessionCookieHeader,
   fetchAnyRouterJsonWithCurl,
+  isRetryableAnyRouterCurlError,
   isAnyRouterSessionCredential,
 } from './anyrouterCurl.js';
 
@@ -109,5 +110,37 @@ describe('AnyRouter curl transport', () => {
       else process.env.ANYROUTER_HELPER_ENV_FILE = previousEnvFile;
       await rm(workDir, { recursive: true, force: true });
     }
+  });
+
+  it('can bypass the configured helper for account-scoped proxy requests', async () => {
+    const helperToken = 'test-helper-token-with-enough-length';
+    const workDir = await mkdtemp(join(tmpdir(), 'metapi-anyrouter-helper-bypass-test.'));
+    const envPath = join(workDir, 'helper.env');
+    await writeFile(
+      envPath,
+      `ANYROUTER_HELPER_URL=http://127.0.0.1:1\nANYROUTER_HELPER_TOKEN=${helperToken}\n`,
+      { mode: 0o600 },
+    );
+
+    const previousEnvFile = process.env.ANYROUTER_HELPER_ENV_FILE;
+    process.env.ANYROUTER_HELPER_ENV_FILE = envPath;
+    try {
+      const payload = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/self`, {
+        cookieHeader: 'session=test-session',
+        useHelper: false,
+      });
+      expect(payload).toMatchObject({ success: true, data: { id: 123 } });
+    } finally {
+      if (previousEnvFile === undefined) delete process.env.ANYROUTER_HELPER_ENV_FILE;
+      else process.env.ANYROUTER_HELPER_ENV_FILE = previousEnvFile;
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it('retries only connection and TLS curl failures', () => {
+    expect(isRetryableAnyRouterCurlError({ stderr: 'curl: (28) SSL connection timeout' })).toBe(true);
+    expect(isRetryableAnyRouterCurlError({ stderr: 'curl: (7) Failed to connect to proxy.internal' })).toBe(true);
+    expect(isRetryableAnyRouterCurlError({ stderr: 'curl: (28) Operation timed out with 0 bytes received' })).toBe(false);
+    expect(isRetryableAnyRouterCurlError(new Error('AnyRouter returned non-JSON HTTP 403'))).toBe(false);
   });
 });

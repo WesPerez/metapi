@@ -28,6 +28,7 @@ export function isTransientCheckinFailureMessage(message?: string | null): boole
   if (isCloudflareChallenge(message)) return true;
   const text = message.trim().toLowerCase();
   if (!text) return false;
+  if (text.includes('upstream attempts exhausted')) return false;
   if (/\bhttp\s*(408|425|500|502|503|504|520|521|522|523|524|525|529)\b/.test(text)) return true;
   return (
     text.includes('gateway timeout')

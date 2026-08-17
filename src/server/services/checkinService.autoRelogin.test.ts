@@ -162,6 +162,37 @@ describe('checkinService auto relogin', () => {
     expect(adapterMock.login).not.toHaveBeenCalled();
   });
 
+  it('does not multiply retries after the egress gateway exhausts its attempts', async () => {
+    selectAllMock.mockReturnValue([
+      {
+        accounts: {
+          id: 33,
+          username: 'gateway-exhausted-user',
+          accessToken: 'token',
+          status: 'active',
+          extraConfig: null,
+        },
+        sites: {
+          id: 6,
+          name: 'gateway-exhausted-site',
+          url: 'https://gateway-exhausted.example.com',
+          platform: 'new-api',
+        },
+      },
+    ]);
+    adapterMock.checkin.mockResolvedValue({
+      success: false,
+      message: 'HTTP 502: {"error":"upstream attempts exhausted"}',
+    });
+
+    const { checkinAccount } = await import('./checkinService.js');
+    const result = await checkinAccount(33);
+
+    expect(result.success).toBe(false);
+    expect(adapterMock.checkin).toHaveBeenCalledTimes(1);
+    expect(adapterMock.login).not.toHaveBeenCalled();
+  });
+
   it('does not replay a non-transient authentication failure before relogin policy', async () => {
     selectAllMock.mockReturnValue([
       {

@@ -724,7 +724,7 @@ describe('NewApiAdapter', () => {
   });
 
   it('uses shielded cookie flow for balance and checkin', async () => {
-    const adapter = new NewApiAdapter();
+    const adapter = new AnyRouterAdapter();
     const balance = await adapter.getBalance(baseUrl, COOKIE_SHIELDED_TOKEN);
     const checkin = await adapter.checkin(baseUrl, COOKIE_SHIELDED_TOKEN);
 

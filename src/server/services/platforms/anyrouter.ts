@@ -1,4 +1,4 @@
-import type { ApiTokenInfo, BalanceInfo, CheckinResult, TokenVerifyResult, UserInfo } from './base.js';
+import type { ApiTokenInfo, BalanceInfo, TokenVerifyResult, UserInfo } from './base.js';
 import { NewApiAdapter } from './newApi.js';
 import {
   buildAnyRouterSessionCookieHeader,
@@ -147,47 +147,6 @@ export class AnyRouterAdapter extends NewApiAdapter {
       }
     }
     return super.getBalance(baseUrl, accessToken, platformUserId);
-  }
-
-  override async checkin(
-    baseUrl: string,
-    accessToken: string,
-    platformUserId?: number,
-  ): Promise<CheckinResult> {
-    if (isAnyRouterSessionCredential(accessToken)) {
-      const cookieHeader = buildAnyRouterSessionCookieHeader(accessToken);
-      let firstMessage = '';
-      try {
-        const signIn = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/sign_in`, {
-          method: 'POST',
-          body: '{}',
-          cookieHeader,
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        });
-        if (signIn?.success) {
-          return {
-            success: true,
-            message: signIn.message || 'checked in',
-            reward: signIn.data?.reward?.toString(),
-          };
-        }
-        firstMessage = typeof signIn?.message === 'string' ? signIn.message : '';
-      } catch {}
-
-      try {
-        const checkin = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/checkin`, {
-          method: 'POST',
-          cookieHeader,
-          headers: this.buildUserHeaders(platformUserId),
-        });
-        return {
-          success: checkin?.success === true,
-          message: checkin?.message || firstMessage || 'checkin failed',
-          reward: checkin?.data?.reward?.toString(),
-        };
-      } catch {}
-    }
-    return super.checkin(baseUrl, accessToken, platformUserId);
   }
 
   override async getApiTokens(

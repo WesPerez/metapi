@@ -12,6 +12,7 @@ import { mergeHeadersWithSiteCustomHeaders } from './siteCustomHeaders.js';
 import { resolveProxyUrlFromExtraConfig } from './accountExtraConfig.js';
 import { stripTrailingSlashes } from './urlNormalization.js';
 import { withResinEgressFeedback } from './resinEgressFeedback.js';
+import { createResinEgressGatewayDispatcher, isConfiguredResinProxy } from './resinEgressGatewayDispatcher.js';
 
 const SITE_PROXY_CACHE_TTL_MS = 3_000;
 const SUPPORTED_PROXY_PROTOCOLS = new Set([
@@ -168,6 +169,15 @@ function getDispatcherByProxyUrl(proxyUrl: string, skipCache = false): Dispatche
   }
 
   try {
+    if (isConfiguredResinProxy(normalized)) {
+      const gatewayDispatcher = createResinEgressGatewayDispatcher(normalized);
+      if (gatewayDispatcher) {
+        if (!skipCache) {
+          dispatcherCache.set(normalized, gatewayDispatcher);
+        }
+        return gatewayDispatcher;
+      }
+    }
     const parsedProxyUrl = new URL(normalized);
     const baseDispatcher = SOCKS_PROXY_PROTOCOLS.has(parsedProxyUrl.protocol.toLowerCase())
       ? createSocksDispatcher(parsedProxyUrl)

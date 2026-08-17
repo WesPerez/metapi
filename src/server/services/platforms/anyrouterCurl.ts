@@ -27,7 +27,6 @@ export type AnyRouterCurlRequestOptions = {
   cookieHeader?: string;
   body?: string;
   timeoutMs?: number;
-  useHelper?: boolean;
 };
 
 function curlConfigValue(value: string): string {
@@ -147,7 +146,10 @@ async function fetchViaHelper<T>(
   const text = await response.text();
   const payload = parseJson<T>(text);
   if (!response.ok || !payload) {
-    throw new Error(`AnyRouter helper request failed with HTTP ${response.status}`);
+    const message = typeof (payload as { message?: unknown } | null)?.message === 'string'
+      ? String((payload as { message: string }).message).trim()
+      : '';
+    throw new Error(message || `AnyRouter helper request failed with HTTP ${response.status}`);
   }
   return payload;
 }
@@ -248,24 +250,6 @@ function isShieldChallenge(content: string): boolean {
   return /var\s+arg1\s*=|acw_sc__v2|cdn_sec_tc|denied by http_custom/i.test(content);
 }
 
-export function isRetryableAnyRouterCurlError(error: unknown): boolean {
-  const value = error as { message?: unknown; stderr?: unknown; code?: unknown; killed?: unknown };
-  const text = `${String(value?.message || '')} ${String(value?.stderr || '')}`.toLowerCase();
-  if (value?.killed === true) return true;
-  return (
-    text.includes('ssl connection timeout')
-    || text.includes('failed to connect')
-    || text.includes('could not connect')
-    || text.includes('could not resolve host')
-    || text.includes('could not resolve proxy')
-    || text.includes('proxy connect aborted')
-    || text.includes('connection refused')
-    || text.includes('connection reset by peer')
-    || text.includes('openssl ssl_connect')
-    || text.includes('tls connect error')
-  );
-}
-
 export async function fetchAnyRouterJsonWithCurl<T>(
   requestUrl: string,
   options: AnyRouterCurlRequestOptions = {},
@@ -276,7 +260,7 @@ export async function fetchAnyRouterJsonWithCurl<T>(
   }
 
   const timeoutMs = Math.max(1_000, Math.min(options.timeoutMs || 20_000, 120_000));
-  const helper = options.useHelper === false ? null : await resolveHelperConfig();
+  const helper = await resolveHelperConfig();
   if (helper) {
     return fetchViaHelper<T>(helper, parsedUrl, options, timeoutMs);
   }
@@ -336,17 +320,11 @@ export async function fetchAnyRouterJsonWithCurl<T>(
     await writeFile(configPath, `${configLines.join('\n')}\n`, { mode: 0o600 });
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      let stdout = '';
-      try {
-        ({ stdout } = await execFileAsync('curl', ['--config', configPath], {
-          encoding: 'utf8',
-          maxBuffer: MAX_RESPONSE_BYTES,
-          timeout: timeoutMs + 2_000,
-        }));
-      } catch (error) {
-        if (attempt >= 2 || !isRetryableAnyRouterCurlError(error)) throw error;
-        continue;
-      }
+      const { stdout } = await execFileAsync('curl', ['--config', configPath], {
+        encoding: 'utf8',
+        maxBuffer: MAX_RESPONSE_BYTES,
+        timeout: timeoutMs + 2_000,
+      });
       const statusCode = Number.parseInt(stdout.trim(), 10);
       const responseBody = await readFile(responseBodyPath, 'utf8');
       const payload = parseJson<T>(responseBody);

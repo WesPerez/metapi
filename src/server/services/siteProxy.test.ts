@@ -290,23 +290,6 @@ describe('siteProxy', () => {
     expect('dispatcher' in result).toBe(true);
   });
 
-  it('resolveSiteProxyUrlByRequestUrl returns the account proxy override', async () => {
-    const { resolveSiteProxyUrlByRequestUrl, withAccountProxyOverride } = await import('./siteProxy.js');
-
-    await db.insert(schema.sites).values({
-      name: 'curl-als-site',
-      url: 'https://curl-als-site.example.com',
-      platform: 'new-api',
-    }).run();
-
-    const result = await withAccountProxyOverride(
-      'socks5h://account-proxy:1080',
-      () => resolveSiteProxyUrlByRequestUrl('https://curl-als-site.example.com/api/user/self'),
-    );
-
-    expect(result).toBe('socks5h://account-proxy:1080');
-  });
-
   it('withAccountProxyOverride skips ALS when proxy is null', async () => {
     const { withAccountProxyOverride, withSiteProxyRequestInit } = await import('./siteProxy.js');
 

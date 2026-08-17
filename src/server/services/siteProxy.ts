@@ -412,8 +412,6 @@ async function resolveSiteRequestConfigByRequestUrl(requestUrl: string): Promise
 }
 
 export async function resolveSiteProxyUrlByRequestUrl(requestUrl: string): Promise<string | null> {
-  const alsOverride = accountProxyOverride.getStore();
-  if (alsOverride !== undefined) return alsOverride;
   const resolved = await resolveSiteRequestConfigByRequestUrl(requestUrl);
   return resolved.proxyUrl;
 }

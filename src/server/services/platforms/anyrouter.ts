@@ -154,48 +154,47 @@ export class AnyRouterAdapter extends NewApiAdapter {
     accessToken: string,
     platformUserId?: number,
   ): Promise<CheckinResult> {
-    if (!isAnyRouterSessionCredential(accessToken)) {
-      return super.checkin(baseUrl, accessToken, platformUserId);
-    }
-
-    const cookieHeader = buildAnyRouterSessionCookieHeader(accessToken);
-    let failureMessage = '';
-    try {
-      const signIn = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/sign_in`, {
-        method: 'POST',
-        body: '{}',
-        cookieHeader,
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        useHelper: false,
-      });
-      if (signIn?.success) {
-        return {
-          success: true,
-          message: signIn.message || 'checked in',
-          reward: signIn.data?.reward?.toString(),
-        };
+    if (isAnyRouterSessionCredential(accessToken)) {
+      const cookieHeader = buildAnyRouterSessionCookieHeader(accessToken);
+      let firstMessage = '';
+      try {
+        const signIn = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/sign_in`, {
+          method: 'POST',
+          body: '{}',
+          cookieHeader,
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (signIn?.success) {
+          return {
+            success: true,
+            message: signIn.message || 'checked in',
+            reward: signIn.data?.reward?.toString(),
+          };
+        }
+        firstMessage = typeof signIn?.message === 'string' ? signIn.message : '';
+      } catch (error) {
+        firstMessage = error instanceof Error ? error.message : String(error || '');
       }
-      failureMessage = typeof signIn?.message === 'string' ? signIn.message : '';
-    } catch (error) {
-      failureMessage = error instanceof Error ? error.message : String(error || '');
-    }
 
-    try {
-      const checkin = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/checkin`, {
-        method: 'POST',
-        cookieHeader,
-        headers: this.buildUserHeaders(platformUserId),
-        useHelper: false,
-      });
-      return {
-        success: checkin?.success === true,
-        message: checkin?.message || failureMessage || 'checkin failed',
-        reward: checkin?.data?.reward?.toString(),
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || '');
-      return { success: false, message: message || failureMessage || 'checkin failed' };
+      try {
+        const checkin = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/checkin`, {
+          method: 'POST',
+          cookieHeader,
+          headers: this.buildUserHeaders(platformUserId),
+        });
+        return {
+          success: checkin?.success === true,
+          message: checkin?.message || firstMessage || 'checkin failed',
+          reward: checkin?.data?.reward?.toString(),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || '');
+        return { success: false, message: message || firstMessage || 'checkin failed' };
+      }
+
+      return { success: false, message: firstMessage || 'checkin failed' };
     }
+    return super.checkin(baseUrl, accessToken, platformUserId);
   }
 
   override async getApiTokens(

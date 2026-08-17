@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAnyRouterSessionCookieHeader,
   fetchAnyRouterJsonWithCurl,
-  isRetryableAnyRouterCurlError,
   isAnyRouterSessionCredential,
 } from './anyrouterCurl.js';
 
@@ -112,35 +111,40 @@ describe('AnyRouter curl transport', () => {
     }
   });
 
-  it('can bypass the configured helper for account-scoped proxy requests', async () => {
+  it('preserves the helper failure message', async () => {
     const helperToken = 'test-helper-token-with-enough-length';
-    const workDir = await mkdtemp(join(tmpdir(), 'metapi-anyrouter-helper-bypass-test.'));
+    const workDir = await mkdtemp(join(tmpdir(), 'metapi-anyrouter-helper-error-test.'));
     const envPath = join(workDir, 'helper.env');
+
+    await new Promise<void>((resolve, reject) => {
+      server.close((error?: Error) => (error ? reject(error) : resolve()));
+    });
+    server = createServer((_request, response) => {
+      response.writeHead(502, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({
+        success: false,
+        message: 'curl failed: SSL connection timeout',
+      }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${address.port}`;
     await writeFile(
       envPath,
-      `ANYROUTER_HELPER_URL=http://127.0.0.1:1\nANYROUTER_HELPER_TOKEN=${helperToken}\n`,
+      `ANYROUTER_HELPER_URL=${baseUrl}\nANYROUTER_HELPER_TOKEN=${helperToken}\n`,
       { mode: 0o600 },
     );
 
     const previousEnvFile = process.env.ANYROUTER_HELPER_ENV_FILE;
     process.env.ANYROUTER_HELPER_ENV_FILE = envPath;
     try {
-      const payload = await fetchAnyRouterJsonWithCurl<any>(`${baseUrl}/api/user/self`, {
-        cookieHeader: 'session=test-session',
-        useHelper: false,
-      });
-      expect(payload).toMatchObject({ success: true, data: { id: 123 } });
+      await expect(fetchAnyRouterJsonWithCurl<any>('https://anyrouter.top/api/user/self', {
+        cookieHeader: 'session=fake-session-cookie',
+      })).rejects.toThrow('SSL connection timeout');
     } finally {
       if (previousEnvFile === undefined) delete process.env.ANYROUTER_HELPER_ENV_FILE;
       else process.env.ANYROUTER_HELPER_ENV_FILE = previousEnvFile;
       await rm(workDir, { recursive: true, force: true });
     }
-  });
-
-  it('retries only connection and TLS curl failures', () => {
-    expect(isRetryableAnyRouterCurlError({ stderr: 'curl: (28) SSL connection timeout' })).toBe(true);
-    expect(isRetryableAnyRouterCurlError({ stderr: 'curl: (7) Failed to connect to proxy.internal' })).toBe(true);
-    expect(isRetryableAnyRouterCurlError({ stderr: 'curl: (28) Operation timed out with 0 bytes received' })).toBe(false);
-    expect(isRetryableAnyRouterCurlError(new Error('AnyRouter returned non-JSON HTTP 403'))).toBe(false);
   });
 });

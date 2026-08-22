@@ -82,6 +82,14 @@ describe('checkinScheduler', () => {
     expect(scheduleMock).toHaveBeenCalledTimes(2);
   });
 
+  it('starts only the check-in task in check-in app mode', async () => {
+    const scheduler = await import('./checkinScheduler.js');
+
+    await scheduler.startScheduler({ checkinOnly: true });
+
+    expect(scheduleMock).toHaveBeenCalledTimes(1);
+  });
+
   it('selects due accounts from the last successful checkin time', async () => {
     const scheduler = await import('./checkinScheduler.js');
     const now = new Date('2026-03-20T12:00:00.000Z');

@@ -49,10 +49,16 @@ const accountHealthRefreshPayloadSchema = z.object({
 }).passthrough();
 
 const accountLoginPayloadSchema = z.object({
-  siteId: z.number().int().positive(),
+  siteId: z.number().int().positive().optional(),
+  siteName: z.string().trim().optional(),
+  siteUrl: z.string().trim().optional(),
+  sitePlatform: z.string().trim().optional(),
   username: z.string(),
   password: z.string(),
-}).passthrough();
+}).passthrough().refine(
+  (value) => Boolean(value.siteId || value.siteUrl),
+  { message: 'siteId or siteUrl is required' },
+);
 
 const accountVerifyTokenPayloadSchema = z.object({
   siteId: z.number().int().positive(),
@@ -81,6 +87,9 @@ function normalizeAccountsPayloadInput(input: unknown): unknown {
 function formatAccountsPayloadError(error: z.ZodError): string {
   const firstIssue = error.issues[0];
   const firstPath = firstIssue?.path[0];
+  if (!firstPath && firstIssue?.message === 'siteId or siteUrl is required') {
+    return 'siteId or siteUrl is required.';
+  }
   if (firstPath === 'siteId') {
     return 'Invalid siteId. Expected positive number.';
   }

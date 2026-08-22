@@ -266,22 +266,26 @@ if (existsSync(webDir)) {
 }
 
 // Start scheduler
-await startScheduler();
-await reloadBackupWebdavScheduler();
-startSiteAnnouncementPolling();
-startModelAvailabilityProbeScheduler();
-startChannelRecoveryProbeScheduler();
-startSub2ApiManagedRefreshScheduler();
-startUpdateCenterPolling();
-startUsageAggregationProjectorScheduler();
-startAdminSnapshotWarmScheduler();
-try {
-  await startOAuthLoopbackCallbackServers();
-} catch (error) {
-  console.warn(`Failed to start OAuth callback listeners: ${(error as Error)?.message || 'unknown error'}`);
+await startScheduler({ checkinOnly: config.checkinAppMode });
+if (config.checkinAppMode) {
+  console.log('[Startup] Check-in app mode: auxiliary background services disabled');
+} else {
+  await reloadBackupWebdavScheduler();
+  startSiteAnnouncementPolling();
+  startModelAvailabilityProbeScheduler();
+  startChannelRecoveryProbeScheduler();
+  startSub2ApiManagedRefreshScheduler();
+  startUpdateCenterPolling();
+  startUsageAggregationProjectorScheduler();
+  startAdminSnapshotWarmScheduler();
+  try {
+    await startOAuthLoopbackCallbackServers();
+  } catch (error) {
+    console.warn(`Failed to start OAuth callback listeners: ${(error as Error)?.message || 'unknown error'}`);
+  }
+  setLegacyProxyLogRetentionFallbackEnabled(!config.logCleanupConfigured);
+  startProxyFileRetentionService();
 }
-setLegacyProxyLogRetentionFallbackEnabled(!config.logCleanupConfigured);
-startProxyFileRetentionService();
 app.addHook('onClose', async () => {
   stopSiteAnnouncementPolling();
   stopUpdateCenterPolling();

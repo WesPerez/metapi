@@ -19,6 +19,11 @@ import { useAnimatedVisibility } from './components/useAnimatedVisibility.js';
 import { useIsMobile } from './components/useIsMobile.js';
 import { MobileDrawer } from './components/MobileDrawer.js';
 import CenteredModal from './components/CenteredModal.js';
+
+// The check-in build keeps the existing auth/session implementation while
+// exposing only the account and operational settings surfaces.
+const CHECKIN_MODE = import.meta.env.VITE_CHECKIN_MODE === 'true';
+
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
 const Sites = lazy(() => import('./pages/Sites.js'));
 const Accounts = lazy(() => import('./pages/Accounts.js'));
@@ -242,14 +247,14 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
 
         <section className="login-auth-stage">
           <div className="login-auth-panel">
-            <div className="login-auth-eyebrow">{t('管理员入口')}</div>
+            <div className="login-auth-eyebrow">{t(CHECKIN_MODE ? '签到管理入口' : '管理员入口')}</div>
             <h2 className="login-auth-title">{t('登录')}</h2>
-            <p className="login-auth-copy">{t('请输入管理员令牌后继续。')}</p>
-            <label className="login-auth-label" htmlFor="admin-token-input">{t('管理员令牌')}</label>
+            <p className="login-auth-copy">{t(CHECKIN_MODE ? '请输入管理密码后继续。' : '请输入管理员令牌后继续。')}</p>
+            <label className="login-auth-label" htmlFor="admin-token-input">{t(CHECKIN_MODE ? '管理密码' : '管理员令牌')}</label>
             <input
               id="admin-token-input"
               type="password"
-              placeholder={t('管理员令牌')}
+              placeholder={t(CHECKIN_MODE ? '管理密码' : '管理员令牌')}
               value={token}
               onChange={(e) => {
                 setToken(e.target.value);
@@ -270,9 +275,9 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
             >
               {loading ? <><span className="spinner spinner-sm" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} />{t('验证中...')}</> : t('登录')}
             </button>
-            <div className="login-auth-note">{t('仅校验本地服务访问权限，不会把令牌发送到第三方。')}</div>
+            <div className="login-auth-note">{t(CHECKIN_MODE ? '仅校验本地服务访问权限，不会把密码发送到第三方。' : '仅校验本地服务访问权限，不会把令牌发送到第三方。')}</div>
             <div className="login-auth-footer">
-              <span>{t('管理员登录后继续。')}</span>
+              <span>{t(CHECKIN_MODE ? '登录后管理签到账号。' : '管理员登录后继续。')}</span>
             </div>
           </div>
         </section>
@@ -438,6 +443,16 @@ const topNavItems = [
   { label: '关于', to: '/about' },
 ];
 
+const activeSidebarGroups = CHECKIN_MODE
+  ? sidebarGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => item.to === '/accounts' || item.to === '/settings'),
+    }))
+    .filter((group) => group.items.length > 0)
+  : sidebarGroups;
+const activeTopNavItems = CHECKIN_MODE ? [] : topNavItems;
+
 function PageTransition({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   return <div key={location.pathname} className="page-enter">{children}</div>;
@@ -517,6 +532,7 @@ function AppShell() {
   }, [drawerOpen, isMobile]);
 
   useEffect(() => {
+    if (CHECKIN_MODE) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
@@ -528,7 +544,7 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || CHECKIN_MODE) return;
     let cancelled = false;
 
     const pollEvents = async () => {
@@ -597,7 +613,7 @@ function AppShell() {
   }, [authed, toast]);
 
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || CHECKIN_MODE) return;
     if (localStorage.getItem(FIRST_USE_DOC_REMINDER_KEY)) return;
     localStorage.setItem(FIRST_USE_DOC_REMINDER_KEY, '1');
     toast.info(`${t('首次使用建议先阅读站点文档：')}${SITE_DOCS_URL}`);
@@ -663,7 +679,7 @@ function AppShell() {
           <span className="topbar-logo-text">Metapi</span>
         </div>
         <nav className="topbar-nav">
-          {topNavItems.map((item) => (
+          {activeTopNavItems.map((item) => (
             <NavLink key={item.to} to={item.to} end className={({ isActive }) => `topbar-nav-item ${isActive ? 'active' : ''}`}>
               {t(item.label)}
             </NavLink>
@@ -678,12 +694,12 @@ function AppShell() {
           >
             {language === 'zh' ? 'EN' : '中'}
           </button>
-          <button className="topbar-search-trigger" aria-label={t('搜索 (Ctrl+K)')} onClick={() => setShowSearch(true)}>
+          {!CHECKIN_MODE && <button className="topbar-search-trigger" aria-label={t('搜索 (Ctrl+K)')} onClick={() => setShowSearch(true)}>
             <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
             <span className="topbar-search-label">{t('搜索')}</span>
             <kbd className="topbar-search-kbd">Ctrl K</kbd>
-          </button>
-          <div style={{ position: 'relative' }}>
+          </button>}
+          {!CHECKIN_MODE && <div style={{ position: 'relative' }}>
             <button ref={notifBtnRef} className="topbar-icon-btn" aria-label={t('通知')} onClick={() => setShowNotifications(!showNotifications)}>
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
               {unreadCount > 0 && (
@@ -693,7 +709,7 @@ function AppShell() {
               )}
             </button>
             <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} anchorRef={notifBtnRef} onUnreadCountChange={setUnreadCount} />
-          </div>
+          </div>}
           <div ref={themeMenuRef} style={{ position: 'relative' }}>
             <button
               className="topbar-icon-btn"
@@ -795,7 +811,7 @@ function AppShell() {
               <span>Metapi</span>
             </div>
             <nav className="mobile-nav">
-              {sidebarGroups.map((group) => (
+              {activeSidebarGroups.map((group) => (
                 <div key={group.label} className="mobile-nav-group">
                   <div className="mobile-nav-label">{t(group.label)}</div>
                   {group.items.map((item) => (
@@ -814,7 +830,7 @@ function AppShell() {
               ))}
               <div className="mobile-nav-group">
                 <div className="mobile-nav-label">{t('更多')}</div>
-                {topNavItems.filter((n) => n.to !== '/').map((item) => (
+                {activeTopNavItems.filter((n) => n.to !== '/').map((item) => (
                   <NavLink
                     key={item.to}
                     to={item.to}
@@ -829,7 +845,7 @@ function AppShell() {
           </MobileDrawer>
         ) : (
           <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-            {sidebarGroups.map((group) => (
+            {activeSidebarGroups.map((group) => (
               <div key={group.label} className="sidebar-group">
                 {!sidebarCollapsed && <div className="sidebar-group-label">{t(group.label)}</div>}
                 {group.items.map((item) => (
@@ -860,25 +876,35 @@ function AppShell() {
           <PageTransition>
             <Suspense fallback={<RouteLoadingFallback />}>
               <Routes>
-                <Route path="/" element={<Dashboard adminName={displayName} />} />
-                <Route path="/sites" element={<Sites />} />
-                <Route path="/site-announcements" element={<SiteAnnouncements />} />
-                <Route path="/accounts" element={<Accounts />} />
-                <Route path="/oauth" element={<OAuthManagement />} />
-                <Route path="/tokens" element={<Tokens />} />
-                <Route path="/checkin" element={<CheckinLog />} />
-                <Route path="/routes" element={<TokenRoutes />} />
-                <Route path="/logs" element={<ProxyLogs />} />
-                <Route path="/monitor" element={<Monitors />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/downstream-keys" element={<DownstreamKeys />} />
-                <Route path="/events" element={<ProgramLogs />} />
-                <Route path="/settings/import-export" element={<ImportExport />} />
-                <Route path="/settings/notify" element={<NotificationSettings />} />
-                <Route path="/models" element={<Models />} />
-                <Route path="/playground" element={<ModelTester />} />
-                <Route path="/about" element={<About />} />
-                <Route path="*" element={<Navigate to="/" />} />
+                {CHECKIN_MODE ? (
+                  <>
+                    <Route path="/accounts" element={<Accounts />} />
+                    <Route path="/settings" element={<Settings />} />
+                    <Route path="*" element={<Navigate to="/accounts?segment=session" replace />} />
+                  </>
+                ) : (
+                  <>
+                    <Route path="/" element={<Dashboard adminName={displayName} />} />
+                    <Route path="/sites" element={<Sites />} />
+                    <Route path="/site-announcements" element={<SiteAnnouncements />} />
+                    <Route path="/accounts" element={<Accounts />} />
+                    <Route path="/oauth" element={<OAuthManagement />} />
+                    <Route path="/tokens" element={<Tokens />} />
+                    <Route path="/checkin" element={<CheckinLog />} />
+                    <Route path="/routes" element={<TokenRoutes />} />
+                    <Route path="/logs" element={<ProxyLogs />} />
+                    <Route path="/monitor" element={<Monitors />} />
+                    <Route path="/settings" element={<Settings />} />
+                    <Route path="/downstream-keys" element={<DownstreamKeys />} />
+                    <Route path="/events" element={<ProgramLogs />} />
+                    <Route path="/settings/import-export" element={<ImportExport />} />
+                    <Route path="/settings/notify" element={<NotificationSettings />} />
+                    <Route path="/models" element={<Models />} />
+                    <Route path="/playground" element={<ModelTester />} />
+                    <Route path="/about" element={<About />} />
+                    <Route path="*" element={<Navigate to="/" />} />
+                  </>
+                )}
               </Routes>
             </Suspense>
           </PageTransition>
@@ -892,7 +918,7 @@ function AppShell() {
         onSave={handleSaveProfile}
         t={t}
       />
-      <SearchModal open={showSearch} onClose={() => setShowSearch(false)} />
+      {!CHECKIN_MODE && <SearchModal open={showSearch} onClose={() => setShowSearch(false)} />}
     </>
   );
 }

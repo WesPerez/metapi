@@ -211,7 +211,7 @@ function createLogCleanupTask(cronExpr: string) {
   });
 }
 
-export async function startScheduler() {
+export async function startScheduler(options: { checkinOnly?: boolean } = {}) {
   const activeCheckinCron = await resolveCronSetting('checkin_cron', config.checkinCron);
   const activeCheckinScheduleMode = await resolveJsonSetting<CheckinScheduleMode>(
     'checkin_schedule_mode',
@@ -251,16 +251,25 @@ export async function startScheduler() {
   dailySummaryTask?.stop();
   logCleanupTask?.stop();
   startCheckinSchedule();
-  balanceTask = createBalanceTask(activeBalanceCron);
-  dailySummaryTask = createDailySummaryTask(activeDailySummaryCron);
-  logCleanupTask = createLogCleanupTask(activeLogCleanupCron);
+  balanceTask = null;
+  dailySummaryTask = null;
+  logCleanupTask = null;
+  if (!options.checkinOnly) {
+    balanceTask = createBalanceTask(activeBalanceCron);
+    dailySummaryTask = createDailySummaryTask(activeDailySummaryCron);
+    logCleanupTask = createLogCleanupTask(activeLogCleanupCron);
+  }
 
   console.log(`[Scheduler] Check-in schedule: ${config.checkinScheduleMode} (${config.checkinScheduleMode === 'cron' ? activeCheckinCron : `${config.checkinIntervalHours}h`})`);
-  console.log(`[Scheduler] Balance refresh cron: ${activeBalanceCron}`);
-  console.log(`[Scheduler] Daily summary cron: ${activeDailySummaryCron}`);
-  console.log(
-    `[Scheduler] Log cleanup cron: ${activeLogCleanupCron} (configured=${config.logCleanupConfigured}, usage=${activeLogCleanupUsageLogsEnabled}, program=${activeLogCleanupProgramLogsEnabled}, retentionDays=${activeLogCleanupRetentionDays})`,
-  );
+  if (options.checkinOnly) {
+    console.log('[Scheduler] Check-in app mode: non-check-in scheduled jobs disabled');
+  } else {
+    console.log(`[Scheduler] Balance refresh cron: ${activeBalanceCron}`);
+    console.log(`[Scheduler] Daily summary cron: ${activeDailySummaryCron}`);
+    console.log(
+      `[Scheduler] Log cleanup cron: ${activeLogCleanupCron} (configured=${config.logCleanupConfigured}, usage=${activeLogCleanupUsageLogsEnabled}, program=${activeLogCleanupProgramLogsEnabled}, retentionDays=${activeLogCleanupRetentionDays})`,
+    );
+  }
 }
 
 export function updateCheckinCron(cronExpr: string) {

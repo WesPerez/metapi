@@ -86,6 +86,7 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     resinEgressGatewayUrl: (env.RESIN_EGRESS_GATEWAY_URL || '').trim(),
     resinEgressGatewayTokenFile: (env.RESIN_EGRESS_GATEWAY_TOKEN_FILE || '').trim(),
     accountCredentialSecret: env.ACCOUNT_CREDENTIAL_SECRET || env.AUTH_TOKEN || 'change-me-admin-token',
+    checkinAppMode: parseBoolean(env.CHECKIN_APP_MODE, false),
     checkinCron: env.CHECKIN_CRON || '0 8 * * *',
     checkinScheduleMode: (env.CHECKIN_SCHEDULE_MODE || 'cron').trim().toLowerCase() === 'interval'
       ? 'interval' as const

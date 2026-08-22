@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { db, schema, runtimeDbDialect } from "../../db/index.js";
 import { insertAndGetById } from "../../db/insertHelpers.js";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { analyzePrimarySiteUrl } from "../../../shared/sitePrimaryUrl.js";
 import { refreshBalance } from "../../services/balanceService.js";
 import { getAdapter } from "../../services/platforms/index.js";
 import {
@@ -227,6 +228,58 @@ async function getNextAccountSortOrder(): Promise<number> {
     -1,
   );
   return max + 1;
+}
+
+function normalizeInlineSiteUrl(raw: string): string | null {
+  const normalized = analyzePrimarySiteUrl(raw).persistedUrl;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return normalized.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+async function resolveOrCreateLoginSite(input: {
+  siteId?: number;
+  siteName?: string;
+  siteUrl?: string;
+  sitePlatform?: string;
+}): Promise<typeof schema.sites.$inferSelect | null> {
+  if (input.siteId) {
+    return db
+      .select()
+      .from(schema.sites)
+      .where(eq(schema.sites.id, input.siteId))
+      .get();
+  }
+
+  const siteUrl = normalizeInlineSiteUrl(String(input.siteUrl || ""));
+  if (!siteUrl) return null;
+  const platform = String(input.sitePlatform || "new-api").trim().toLowerCase() || "new-api";
+  const existing = await db
+    .select()
+    .from(schema.sites)
+    .where(and(eq(schema.sites.platform, platform), eq(schema.sites.url, siteUrl)))
+    .get();
+  if (existing) return existing;
+
+  return insertAndGetById<typeof schema.sites.$inferSelect>({
+    table: schema.sites,
+    idColumn: schema.sites.id,
+    values: {
+      name: String(input.siteName || "").trim() || new URL(siteUrl).host,
+      url: siteUrl,
+      platform,
+      status: "active",
+      isPinned: false,
+      sortOrder: 0,
+      globalWeight: 1,
+    },
+    insertErrorMessage: "site create failed",
+    loadErrorMessage: "site create failed",
+  });
 }
 
 type LoginFailureInfo = {
@@ -509,15 +562,13 @@ export async function accountsRoutes(app: FastifyInstance) {
           .send({ success: false, message: parsedBody.error });
       }
 
-      const { siteId, username, password } = parsedBody.data;
+      const { username, password } = parsedBody.data;
 
-      // Get site info
-      const site = await db
-        .select()
-        .from(schema.sites)
-        .where(eq(schema.sites.id, siteId))
-        .get();
-      if (!site) return { success: false, message: "site not found" };
+      // Check-in mode can create or reuse the hidden site record directly
+      // from the account form, so users never need the Sites page.
+      const site = await resolveOrCreateLoginSite(parsedBody.data);
+      if (!site) return { success: false, message: "site not found or invalid site URL" };
+      const siteId = site.id;
 
       // Get platform adapter
       const adapter = getAdapter(site.platform);

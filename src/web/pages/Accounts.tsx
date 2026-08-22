@@ -39,6 +39,12 @@ import { SITE_DOCS_URL } from "../docsLink.js";
 import { getSiteInitializationPreset } from "../../shared/siteInitializationPresets.js";
 import { parseBatchApiKeys } from "../../shared/apiKeyBatch.js";
 
+const CHECKIN_MODE = Boolean(
+  import.meta.env.VITE_CHECKIN_MODE === "true" ||
+    import.meta.env.VITE_CHECKIN_MODE === "1" ||
+    import.meta.env.VITE_APP_MODE === "checkin",
+);
+
 type ConnectionsSegment = "session" | "apikey" | "tokens";
 
 const CONNECTION_PAGE_SIZE_OPTIONS = [15, 30, 50] as const;
@@ -76,7 +82,14 @@ const ACCOUNT_SEGMENTS: Array<{
 const SITE_SELECT_SEARCH_PLACEHOLDER = "筛选站点（名称 / 平台 / URL）";
 
 function createLoginForm() {
-  return { siteId: 0, username: "", password: "" };
+  return {
+    siteId: 0,
+    siteName: "",
+    siteUrl: "",
+    sitePlatform: "new-api",
+    username: "",
+    password: "",
+  };
 }
 
 function createTokenForm(credentialMode: "session" | "apikey" = "session") {
@@ -102,6 +115,7 @@ function createRebindForm(platformUserId = "") {
 }
 
 function resolveConnectionsSegment(search: string): ConnectionsSegment {
+  if (CHECKIN_MODE) return "session";
   const rawSegment = new URLSearchParams(search).get("segment");
   if (rawSegment === "apikey" || rawSegment === "tokens") return rawSegment;
   return "session";
@@ -141,7 +155,9 @@ export default function Accounts() {
   const isMobile = useIsMobile();
   const [showMobileTools, setShowMobileTools] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [addMode, setAddMode] = useState<"token" | "login">("token");
+  const [addMode, setAddMode] = useState<"token" | "login">(
+    CHECKIN_MODE ? "login" : "token",
+  );
   const [loginForm, setLoginForm] = useState(createLoginForm);
   const [tokenForm, setTokenForm] = useState(() => createTokenForm("session"));
   const [createIntentPresetId, setCreateIntentPresetId] = useState<
@@ -286,7 +302,7 @@ export default function Accounts() {
   const resetAddForms = (
     credentialMode: "session" | "apikey" = activeAddCredentialMode,
   ) => {
-    setAddMode("token");
+    setAddMode(CHECKIN_MODE ? "login" : "token");
     setLoginForm(createLoginForm());
     setTokenForm(createTokenForm(credentialMode));
     setCreateIntentPresetId(null);
@@ -431,6 +447,7 @@ export default function Accounts() {
   const addAccountPrereqHint = buildAddAccountPrereqHint(verifyResult);
 
   const setSegment = (nextSegment: ConnectionsSegment) => {
+    if (CHECKIN_MODE && nextSegment !== "session") return;
     const params = new URLSearchParams(location.search);
     if (nextSegment === "session") params.delete("segment");
     else params.set("segment", nextSegment);
@@ -443,6 +460,21 @@ export default function Accounts() {
       { replace: false },
     );
   };
+
+  useEffect(() => {
+    if (!CHECKIN_MODE) return;
+    const params = new URLSearchParams(location.search);
+    if (!params.has("segment")) return;
+    params.delete("segment");
+    const nextSearch = params.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? "?" + nextSearch : "",
+      },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (activeSegment !== "tokens") return;
@@ -482,7 +514,7 @@ export default function Accounts() {
       params.get("initPreset"),
     );
     setShowAdd(true);
-    setAddMode("token");
+    setAddMode(CHECKIN_MODE ? "login" : "token");
     setVerifyResult(null);
     setCreateIntentPresetId(initializationPreset?.id || null);
     setApplyCreatePresetModels(
@@ -520,10 +552,21 @@ export default function Accounts() {
   }, []);
 
   const handleLoginAdd = async () => {
-    if (!loginForm.siteId || !loginForm.username || !loginForm.password) return;
+    if (
+      (!loginForm.siteId && !loginForm.siteUrl.trim()) ||
+      !loginForm.username ||
+      !loginForm.password
+    ) return;
     setSaving(true);
     try {
-      const result = await api.loginAccount(loginForm);
+      const result = await api.loginAccount({
+        siteId: loginForm.siteId || undefined,
+        siteName: loginForm.siteName.trim() || undefined,
+        siteUrl: loginForm.siteUrl.trim() || undefined,
+        sitePlatform: loginForm.sitePlatform,
+        username: loginForm.username,
+        password: loginForm.password,
+      });
       if (result.success) {
         closeAddPanel();
         const msg = result.apiTokenFound
@@ -1117,6 +1160,25 @@ export default function Accounts() {
     });
   };
 
+  const openCopyAccountPanel = (account: any) => {
+    const site = account?.site || {};
+    setEditingAccount(null);
+    closeRebindPanel();
+    setShowAdd(true);
+    setAddMode("login");
+    setVerifyResult(null);
+    setTokenForm(createTokenForm("session"));
+    setLoginForm({
+      siteId: Number(account?.site?.id ?? account?.siteId) || 0,
+      siteName: String(site.name || ""),
+      siteUrl: String(site.url || ""),
+      sitePlatform: String(site.platform || "new-api"),
+      username: String(account?.username || ""),
+      password: "",
+    });
+    toast.info("已复制连接配置，请填写密码后创建新账号");
+  };
+
   const closeEditPanel = () => {
     setEditingAccount(null);
     setSavingEdit(false);
@@ -1552,7 +1614,7 @@ export default function Accounts() {
               </>
             ) : (
               <>
-                <div
+                {!CHECKIN_MODE && <div
                   className="accounts-sort-select"
                   style={{ minWidth: 156, position: "relative", zIndex: 20 }}
                 >
@@ -1567,7 +1629,7 @@ export default function Accounts() {
                     ]}
                     placeholder="自定义排序"
                   />
-                </div>
+                </div>}
                 {activeSegment === "session" && (
                   <button
                     onClick={() =>
@@ -1714,7 +1776,7 @@ export default function Accounts() {
             borderRadius: "var(--radius-md)",
           }}
         >
-          {ACCOUNT_SEGMENTS.map((segment) => (
+          {(CHECKIN_MODE ? ACCOUNT_SEGMENTS.slice(0, 1) : ACCOUNT_SEGMENTS).map((segment) => (
           <button
             key={segment.value}
             type="button"
@@ -2008,7 +2070,7 @@ export default function Accounts() {
             title={
               activeSegment === "apikey"
                 ? "添加 API Key 连接"
-                : addMode === "login"
+                : CHECKIN_MODE || addMode === "login"
                   ? "账号密码登录"
                   : "添加 Session 连接"
             }
@@ -2022,7 +2084,7 @@ export default function Accounts() {
           >
             {activeSegment === "session" ? (
               <>
-                <div
+                {!CHECKIN_MODE && <div
                   style={{
                     display: "flex",
                     gap: 0,
@@ -2088,9 +2150,9 @@ export default function Accounts() {
                   >
                     账号密码登录
                   </button>
-                </div>
+                </div>}
 
-                {addMode === "token" ? (
+                {!CHECKIN_MODE && addMode === "token" ? (
                   <div
                     style={{
                       display: "flex",
@@ -2471,6 +2533,42 @@ export default function Accounts() {
                       searchable
                       searchPlaceholder={SITE_SELECT_SEARCH_PLACEHOLDER}
                     />
+                    {CHECKIN_MODE && (
+                      <>
+                        <input
+                          placeholder="站点名称（可选）"
+                          value={loginForm.siteName}
+                          onChange={(e) =>
+                            setLoginForm((f) => ({ ...f, siteName: e.target.value }))
+                          }
+                          style={inputStyle}
+                        />
+                        <input
+                          placeholder="站点 Base URL / API URL"
+                          value={loginForm.siteUrl}
+                          onChange={(e) =>
+                            setLoginForm((f) => ({ ...f, siteUrl: e.target.value }))
+                          }
+                          style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                        />
+                        <ModernSelect
+                          value={loginForm.sitePlatform}
+                          onChange={(value) =>
+                            setLoginForm((f) => ({ ...f, sitePlatform: value }))
+                          }
+                          options={[
+                            { value: "new-api", label: "New API" },
+                            { value: "one-api", label: "One API" },
+                            { value: "veloera", label: "Veloera" },
+                            { value: "one-hub", label: "OneHub" },
+                            { value: "done-hub", label: "DoneHub" },
+                            { value: "anyrouter", label: "AnyRouter" },
+                            { value: "sub2api", label: "Sub2API" },
+                          ]}
+                          placeholder="站点平台"
+                        />
+                      </>
+                    )}
                     <input
                       placeholder="用户名"
                       value={loginForm.username}
@@ -2499,7 +2597,7 @@ export default function Accounts() {
                       onClick={handleLoginAdd}
                       disabled={
                         saving ||
-                        !loginForm.siteId ||
+                        (!loginForm.siteId && !loginForm.siteUrl.trim()) ||
                         !loginForm.username ||
                         !loginForm.password
                       }
@@ -3262,6 +3360,12 @@ export default function Accounts() {
                               {isExpanded ? "收起" : "详情"}
                             </button>
                             <button
+                              onClick={() => openCopyAccountPanel(a)}
+                              className="btn btn-link btn-link-primary"
+                            >
+                              复制
+                            </button>
+                            <button
                               onClick={() => openEditPanel(a)}
                               className="btn btn-link btn-link-info"
                             >
@@ -4012,6 +4116,12 @@ export default function Accounts() {
                                     重新绑定
                                   </button>
                                 )}
+                              <button
+                                onClick={() => openCopyAccountPanel(a)}
+                                className="btn btn-link btn-link-primary"
+                              >
+                                复制
+                              </button>
                               <button
                                 onClick={() => openEditPanel(a)}
                                 className="btn btn-link btn-link-info"

@@ -4,6 +4,9 @@ FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
+ARG VITE_CHECKIN_MODE=false
+ENV VITE_CHECKIN_MODE=$VITE_CHECKIN_MODE
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*

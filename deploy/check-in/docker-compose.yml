@@ -1,0 +1,48 @@
+services:
+  metapi-checkin:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+      args:
+        VITE_CHECKIN_MODE: "true"
+    image: metapi-checkin:local
+    container_name: metapi-checkin
+    ports:
+      - "127.0.0.1:${CHECKIN_PORT:-14000}:4000"
+    extra_hosts:
+      - "proxy.internal:host-gateway"
+    volumes:
+      - ${CHECKIN_DATA_DIR:-/root/metapi-checkin-deploy/data}:/app/data
+      - /etc/metapi-anyrouter-helper.env:/run/secrets/metapi-anyrouter-helper.env:ro
+      - /etc/resin-egress-gateway/gateway.token:/run/secrets/resin-egress-gateway.token:ro
+    environment:
+      AUTH_TOKEN: ${AUTH_TOKEN:?AUTH_TOKEN is required}
+      PROXY_TOKEN: ${PROXY_TOKEN:?PROXY_TOKEN is required}
+      ACCOUNT_CREDENTIAL_SECRET: ${ACCOUNT_CREDENTIAL_SECRET:?ACCOUNT_CREDENTIAL_SECRET is required}
+      CHECKIN_APP_MODE: ${CHECKIN_APP_MODE:-true}
+      CHECKIN_CRON: ${CHECKIN_CRON:-0 9 * * *}
+      CHECKIN_SCHEDULE_MODE: ${CHECKIN_SCHEDULE_MODE:-cron}
+      CHECKIN_INTERVAL_HOURS: ${CHECKIN_INTERVAL_HOURS:-6}
+      BALANCE_REFRESH_CRON: ${BALANCE_REFRESH_CRON:-0 * * * *}
+      PORT: "4000"
+      HOST: "0.0.0.0"
+      DATA_DIR: /app/data
+      TZ: ${TZ:-Asia/Shanghai}
+      ANYROUTER_HELPER_ENV_FILE: /run/secrets/metapi-anyrouter-helper.env
+      RESIN_STICKY_PROXY_ENDPOINTS: ${RESIN_STICKY_PROXY_ENDPOINTS:-proxy.internal:10834}
+      RESIN_EGRESS_GATEWAY_URL: ${RESIN_EGRESS_GATEWAY_URL:-http://resin-egress-gateway:8080}
+      RESIN_EGRESS_GATEWAY_TOKEN_FILE: ${RESIN_EGRESS_GATEWAY_TOKEN_FILE:-/run/secrets/resin-egress-gateway.token}
+      PROXY_FIRST_BYTE_TIMEOUT_SEC: ${PROXY_FIRST_BYTE_TIMEOUT_SEC:-120}
+    networks:
+      - metapi-deploy_default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/settings/auth/info').then(r => process.exit(r.status === 401 || r.status === 200 ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  metapi-deploy_default:
+    external: true

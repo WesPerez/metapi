@@ -30,6 +30,8 @@ import { clearAppInstallationState } from '../appLocalState.js';
 import { tr } from '../i18n.js';
 import { generateDownstreamSkKey } from './helpers/generateDownstreamSkKey.js';
 
+const CHECKIN_MODE = import.meta.env.VITE_CHECKIN_MODE === 'true';
+
 const PROXY_TOKEN_PREFIX = 'sk-';
 const FACTORY_RESET_ADMIN_TOKEN = 'change-me-admin-token';
 const FACTORY_RESET_CONFIRM_SECONDS = 3;
@@ -1317,11 +1319,11 @@ export default function Settings() {
 
       <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div className="card animate-slide-up stagger-1" style={{ padding: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>管理员登录令牌</div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>{CHECKIN_MODE ? '管理密码' : '管理员登录令牌'}</div>
           <code style={{ display: 'block', padding: '10px 14px', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border-light)', marginBottom: 12 }}>
             {maskedToken || '****'}
           </code>
-          <button onClick={() => setShowChangeKey(true)} className="btn btn-primary">修改登录令牌</button>
+          <button onClick={() => setShowChangeKey(true)} className="btn btn-primary">{CHECKIN_MODE ? '修改管理密码' : '修改登录令牌'}</button>
           <ChangeKeyModal
             open={showChangeKey}
             onClose={() => {
@@ -1366,7 +1368,7 @@ export default function Settings() {
               {testingCheckin ? '触发中...' : '测试一次签到'}
             </button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile || CHECKIN_MODE ? '1fr' : '1fr 1fr', gap: 12 }}>
             <div>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>签到 Cron</div>
               <input
@@ -1376,16 +1378,16 @@ export default function Settings() {
                 disabled={runtime.checkinScheduleMode !== 'cron'}
               />
             </div>
-            <div>
+            {!CHECKIN_MODE && <div>
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>余额刷新 Cron</div>
               <input
                 value={runtime.balanceRefreshCron}
                 onChange={(e) => setRuntime((prev) => ({ ...prev, balanceRefreshCron: e.target.value }))}
                 style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
               />
-            </div>
+            </div>}
           </div>
-          <div
+          {!CHECKIN_MODE && <div
             style={{
               marginTop: 16,
               paddingTop: 16,
@@ -1444,7 +1446,7 @@ export default function Settings() {
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
               默认每天早上 6 点执行。按每次定时任务执行时间，清理早于“保留天数”的日志；两个选项都不勾选时不会实际删除日志。
             </div>
-          </div>
+          </div>}
           <div style={{ marginTop: 12 }}>
             <button onClick={saveSchedule} disabled={savingSchedule} className="btn btn-primary">
               {savingSchedule ? <><span className="spinner spinner-sm" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} /> 保存中...</> : '保存定时任务'}
@@ -1455,7 +1457,9 @@ export default function Settings() {
         <div className="card animate-slide-up stagger-3" style={{ padding: 20 }}>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>系统代理</div>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
-            配置一个全局出站代理地址，站点页可按站点决定是否启用系统代理。
+            {CHECKIN_MODE
+              ? '配置签到账号访问上游服务时使用的全局出站代理。'
+              : '配置一个全局出站代理地址，站点页可按站点决定是否启用系统代理。'}
           </div>
           <input
             value={runtime.systemProxyUrl}
@@ -1494,6 +1498,7 @@ export default function Settings() {
           )}
         </div>
 
+        {!CHECKIN_MODE && <>
         <div className="card animate-slide-up stagger-4" style={{ padding: 20 }}>
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>代理失败判定</div>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
@@ -2624,6 +2629,7 @@ export default function Settings() {
             </button>
           </div>
         </div>
+        </>}
       </div>
       <FactoryResetModal
         presence={factoryResetPresence}

@@ -23,6 +23,7 @@ type EnsureRuntimeDatabaseReadyInput = {
 
 export async function ensureRuntimeDatabaseReady(input: EnsureRuntimeDatabaseReadyInput): Promise<void> {
   if (input.dialect === 'sqlite') {
+    if (process.env.CHECKIN_APP_MODE === 'true') return;
     const runSqlite = input.runSqliteRuntimeMigrations || runSqliteRuntimeMigrations;
     await runSqlite();
     return;

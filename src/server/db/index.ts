@@ -497,6 +497,7 @@ export async function ensureProxyFileCompatibilityColumns(): Promise<void> {
 }
 
 function ensureRouteGroupingSchema() {
+  if (process.env.CHECKIN_APP_MODE === 'true') return;
   if (!tableExists('token_routes') || !tableExists('route_channels')) {
     return;
   }
@@ -1364,11 +1365,13 @@ function initSqliteDb() {
   ensureSiteExternalCheckinUrlSchema();
   ensureSiteGlobalWeightSchema();
   ensureRouteGroupingSchema();
-  ensureDownstreamApiKeySchema();
-  ensureProxyLogBillingDetailsSchema();
-  ensureProxyLogClientSchema();
-  ensureProxyVideoTaskSchema();
-  ensureProxyFileSchema();
+  if (process.env.CHECKIN_APP_MODE !== 'true') {
+    ensureDownstreamApiKeySchema();
+    ensureProxyLogBillingDetailsSchema();
+    ensureProxyLogClientSchema();
+    ensureProxyVideoTaskSchema();
+    ensureProxyFileSchema();
+  }
 
   const rawDb = drizzleSqliteProxy(
     (sqlText, params, method) => sqliteProxyQuery(sqlText, params, method as SqlMethod),

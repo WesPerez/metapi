@@ -1308,6 +1308,9 @@ async function refreshModelsForAllActiveAccounts(): Promise<ModelRefreshResult[]
 }
 
 export async function rebuildTokenRoutesFromAvailability() {
+  if (process.env.CHECKIN_APP_MODE === 'true') {
+    return { models: 0, createdRoutes: 0, createdChannels: 0, removedChannels: 0, removedRoutes: 0 };
+  }
   const tokenRows = await db.select().from(schema.tokenModelAvailability)
     .innerJoin(schema.accountTokens, eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id))
     .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))

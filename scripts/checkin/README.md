@@ -1,13 +1,9 @@
 # Check-in Database Tools
 
-These helpers keep the existing SQLite schema contract intact while making a
-standalone check-in deployment easier to reproduce.
-
-The current server still imports the full Drizzle schema and runs all canonical
-migrations at startup. Do not `DROP TABLE` from a production database: missing
-compatibility tables can be recreated by startup code, and account/model pages
-still reference some of them. The supported cleanup is data retention, not
-physical schema surgery.
+These helpers define the smaller SQLite contract used by the standalone
+check-in deployment. They create the exact 12-table schema, validate it against
+the embedded DDL, and can prune retired tables from an older full MetAPI
+database after making a backup.
 
 ## Initialize a new database
 
@@ -17,27 +13,26 @@ From a complete `/root/metapi` checkout:
 npx tsx scripts/checkin/init-checkin-database.ts --db ./data/hub.db --apply
 ```
 
-`--apply` invokes the repository's canonical `src/server/db/migrate.ts`, then
-checks the full compatibility table set and `PRAGMA integrity_check`. Without
-`--apply`, an existing database is read-only validated.
+`--apply` creates exactly the retained tables and indexes. Without `--apply`, an
+existing database is read-only validated against the standalone shape.
 
-## Preview and apply retention cleanup
+## Validate and apply physical cleanup
 
 ```bash
 npx tsx scripts/checkin/prune-checkin-database.ts --db ./data/hub.db
 npx tsx scripts/checkin/prune-checkin-database.ts --db ./data/hub.db --apply --vacuum
 ```
 
-The first command is a dry-run. An apply run creates a timestamped SQLite
-`.backup` snapshot before writing, runs one transaction, checks protected core
-table row/content digests, preserves unread events, and runs integrity checks.
-`--vacuum` is optional and should only be used when no other process is writing
-the database.
+The first command is a read-only validation. An apply run creates a timestamped
+SQLite `.backup` snapshot before writing, verifies the exact retained schema,
+drops only the listed retired tables, checks protected table/content digests,
+and runs `integrity_check` plus `foreign_key_check`. `--vacuum` is optional and
+should only be used when no other process is writing the database.
 
-Retained data includes sites, accounts and credentials, global settings (the
-admin password and system proxy), check-in history, account tokens, site
-endpoints/disabled-model rules, model availability caches, routing data, the
-migration journal, and unread/recent events. The cleanup removes proxy request
-logs, debug traces/attempts, temporary proxy files/video tasks, usage aggregates,
-admin snapshots, and site announcement cache. Tables remain present as empty
-compatibility shells where appropriate.
+Retained tables are `sites`, `site_api_endpoints`, `site_disabled_models`,
+`accounts`, `account_tokens`, `checkin_logs`, `model_availability`,
+`token_model_availability`, `token_routes`, `route_channels`, `settings`, and
+`events`. The prune operation physically drops the migration journal, OAuth
+route-unit tables, proxy/debug/file/video tables, usage aggregates, downstream
+keys, admin snapshots, and announcement caches. It refuses an unknown table or
+schema drift instead of guessing.

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -173,6 +173,7 @@ async function createBackup(db: Database.Database, options: Options): Promise<st
   const fileName = `${basename(options.dbPath)}.pre-checkin-prune.${timestamp()}-${process.pid}.bak`;
   const destination = resolve(directory, fileName);
   await db.backup(destination);
+  chmodSync(destination, 0o600);
   return destination;
 }
 

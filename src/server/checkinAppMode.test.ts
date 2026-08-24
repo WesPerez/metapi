@@ -66,6 +66,9 @@ describe('check-in app mode startup plan', () => {
     expect(isCheckinApiRequestAllowed('POST', '/api/routes/rebuild')).toBe(false);
     expect(isCheckinApiRequestAllowed('GET', '/api/stats/site-trend')).toBe(false);
     expect(isCheckinApiRequestAllowed('POST', '/api/settings/runtime')).toBe(false);
+    expect(isCheckinApiRequestAllowed('POST', '/api/accounts')).toBe(false);
+    expect(isCheckinApiRequestAllowed('POST', '/api/accounts/verify-token')).toBe(false);
+    expect(isCheckinApiRequestAllowed('POST', '/api/accounts/12/rebind-session')).toBe(false);
   });
 });
 

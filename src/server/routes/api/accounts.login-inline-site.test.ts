@@ -143,6 +143,46 @@ describe('accounts login inline site creation/reuse', () => {
     expect(accounts[0].siteId).toBe(existing.id);
   });
 
+  it('does not discover or store API keys in standalone check-in mode', async () => {
+    const { config } = await import('../../config.js');
+    const previousMode = config.checkinAppMode;
+    config.checkinAppMode = true;
+    getApiTokensMock.mockResolvedValueOnce([
+      { name: 'default', key: 'sk-must-not-be-stored', enabled: true },
+    ]);
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/accounts/login',
+        payload: {
+          siteUrl: 'https://checkin.example.com',
+          username: 'checkin-user',
+          password: 'checkin-password',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        success: true,
+        apiTokenFound: false,
+        tokenCount: 0,
+      });
+      expect(getApiTokensMock).not.toHaveBeenCalled();
+      expect(convergeAccountMutationMock).toHaveBeenCalledWith(expect.objectContaining({
+        preferredApiToken: null,
+        upstreamTokens: [],
+      }));
+
+      const accounts = await db.select().from(schema.accounts).all();
+      expect(accounts).toHaveLength(1);
+      expect(accounts[0].accessToken).toBe('session-token');
+      expect(accounts[0].apiToken).toBeNull();
+    } finally {
+      config.checkinAppMode = previousMode;
+    }
+  });
+
   it('rejects an invalid inline site URL without writing any site or account', async () => {
     const response = await app.inject({
       method: 'POST',

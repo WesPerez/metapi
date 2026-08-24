@@ -908,6 +908,21 @@ export async function settingsRoutes(app: FastifyInstance) {
     }
 
     const body = parsedBody.data as RuntimeSettingsBody;
+    if (config.checkinAppMode) {
+      const allowedKeys = new Set([
+        'checkinCron',
+        'checkinScheduleMode',
+        'checkinIntervalHours',
+        'systemProxyUrl',
+      ]);
+      const unsupportedKeys = Object.keys(body).filter((key) => !allowedKeys.has(key));
+      if (unsupportedKeys.length > 0) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Check-in mode does not support settings: ' + unsupportedKeys.join(', '),
+        });
+      }
+    }
     const changedLabels: string[] = [];
     const currentRequestIp = extractClientIp(request.ip, request.headers['x-forwarded-for']);
     let pendingPayloadRules: typeof config.payloadRules | undefined;

@@ -79,18 +79,18 @@ export const CHECKIN_STARTUP_STEPS_ALWAYS = [
   'ensureRuntimeDatabaseReady',
   'loadRuntimeSettings',
   'ensureSiteCompatibilityColumns',
-  'ensureRouteGroupingCompatibilityColumns',
-  'migrateSiteApiKeysToAccounts',
   'ensureAccountScopedResinProxyIdentityBackfill',
   'startCheckinScheduler',
 ] as const;
 
 export const CHECKIN_STARTUP_STEPS_NORMAL_ONLY = [
+  'ensureRouteGroupingCompatibilityColumns',
   'ensureProxyFileCompatibilityColumns',
   'ensureProxyLogStreamTimingColumns',
   'ensureProxyLogClientColumns',
   'ensureProxyLogDownstreamApiKeyIdColumn',
   'ensureProxyLogBillingDetailsColumn',
+  'migrateSiteApiKeysToAccounts',
   'ensureDefaultSitesSeeded',
   'rebuildRoutesOnly',
   'repairStoredCreatedAtValues',
@@ -114,12 +114,9 @@ const CHECKIN_API_ROUTES: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: 'PUT', path: /^\/api\/settings\/runtime$/u },
   { method: 'POST', path: /^\/api\/settings\/system-proxy\/test$/u },
   { method: 'GET', path: /^\/api\/accounts$/u },
-  { method: 'POST', path: /^\/api\/accounts$/u },
   { method: 'POST', path: /^\/api\/accounts\/login$/u },
-  { method: 'POST', path: /^\/api\/accounts\/verify-token$/u },
   { method: 'POST', path: /^\/api\/accounts\/batch$/u },
   { method: 'POST', path: /^\/api\/accounts\/health\/refresh$/u },
-  { method: 'POST', path: /^\/api\/accounts\/\d+\/rebind-session$/u },
   { method: 'PUT', path: /^\/api\/accounts\/\d+$/u },
   { method: 'DELETE', path: /^\/api\/accounts\/\d+$/u },
   { method: 'POST', path: /^\/api\/accounts\/\d+\/balance$/u },
@@ -376,7 +373,9 @@ export async function main(): Promise<void> {
       await ensureProxyLogBillingDetailsColumn();
       await repairStoredCreatedAtValues();
     }
-    await migrateSiteApiKeysToAccounts();
+    if (!config.checkinAppMode) {
+      await migrateSiteApiKeysToAccounts();
+    }
     if (!config.checkinAppMode) {
       await ensureDefaultSitesSeeded();
     }

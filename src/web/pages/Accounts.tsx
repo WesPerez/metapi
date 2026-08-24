@@ -398,9 +398,11 @@ export default function Accounts() {
       });
       if (result.success) {
         closeAddPanel();
-        const msg = result.apiTokenFound
-          ? `账号 "${loginForm.username}" 已添加，API Key 已自动获取`
-          : `账号 "${loginForm.username}" 已添加（未找到 API Key，请手动设置）`;
+        const msg = CHECKIN_MODE
+          ? `账号 "${loginForm.username}" 已添加`
+          : result.apiTokenFound
+            ? `账号 "${loginForm.username}" 已添加，API Key 已自动获取`
+            : `账号 "${loginForm.username}" 已添加（未找到 API Key，请手动设置）`;
         toast.success(msg);
         load(true);
       } else {
@@ -976,8 +978,12 @@ export default function Accounts() {
         unitCost: editForm.unitCost.trim()
           ? Number(editForm.unitCost.trim())
           : null,
-        accessToken: editForm.accessToken.trim(),
-        apiToken: editForm.apiToken.trim() || null,
+        ...(CHECKIN_MODE
+          ? {}
+          : {
+              accessToken: editForm.accessToken.trim(),
+              apiToken: editForm.apiToken.trim() || null,
+            }),
         isPinned: editForm.isPinned,
         refreshToken: editForm.refreshToken.trim() || null,
         tokenExpiresAt: editForm.tokenExpiresAt.trim()
@@ -1237,6 +1243,7 @@ export default function Accounts() {
     }, 2200);
 
     if (
+      !CHECKIN_MODE &&
       openRebind &&
       target.status === "expired" &&
       !resolveAccountCapabilities(target).proxyOnly
@@ -2098,7 +2105,9 @@ export default function Accounts() {
                 }}
               >
                 <div className="info-tip">
-                  输入目标站点的账号密码，将自动登录并获取访问令牌和 API Key
+                  {CHECKIN_MODE
+                    ? "输入目标站点的账号密码，将自动登录并保存签到会话"
+                    : "输入目标站点的账号密码，将自动登录并获取访问令牌和 API Key"}
                 </div>
                 <ModernSelect
                   value={String(loginForm.siteId || 0)}
@@ -2205,7 +2214,7 @@ export default function Accounts() {
           </>
         </CenteredModal>
 
-        {
+        {!CHECKIN_MODE && (
           <CenteredModal
             open={Boolean(rebindTarget)}
             onClose={closeRebindPanel}
@@ -2394,7 +2403,7 @@ export default function Accounts() {
               </>
             ) : null}
           </CenteredModal>
-        }
+        )}
 
         <CenteredModal
           open={Boolean(editingAccount)}
@@ -2486,28 +2495,32 @@ export default function Accounts() {
                 />
                 启用签到
               </label>
-              <input
-                placeholder="Access Token"
-                value={editForm.accessToken}
-                onChange={(e) =>
-                  setEditForm((prev) => ({
-                    ...prev,
-                    accessToken: e.target.value,
-                  }))
-                }
-                style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
-              />
-              <input
-                placeholder="API Token（可选）"
-                value={editForm.apiToken}
-                onChange={(e) =>
-                  setEditForm((prev) => ({
-                    ...prev,
-                    apiToken: e.target.value,
-                  }))
-                }
-                style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
-              />
+              {!CHECKIN_MODE && (
+                <>
+                  <input
+                    placeholder="Access Token"
+                    value={editForm.accessToken}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        accessToken: e.target.value,
+                      }))
+                    }
+                    style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                  />
+                  <input
+                    placeholder="API Token（可选）"
+                    value={editForm.apiToken}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        apiToken: e.target.value,
+                      }))
+                    }
+                    style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                  />
+                </>
+              )}
               <input
                 placeholder="代理地址（可选，如 http://127.0.0.1:7890）"
                 value={editForm.proxyUrl}
@@ -2877,7 +2890,8 @@ export default function Accounts() {
                                 )}
                               </button>
                             )}
-                            {a.status === "expired" &&
+                            {!CHECKIN_MODE &&
+                              a.status === "expired" &&
                               !capabilities.proxyOnly && (
                                 <button
                                   onClick={() => openRebindPanel(a)}
@@ -3220,7 +3234,8 @@ export default function Accounts() {
                                 )}
                               </button>
                             )}
-                            {a.status === "expired" &&
+                            {!CHECKIN_MODE &&
+                              a.status === "expired" &&
                               !capabilities.proxyOnly && (
                                 <button
                                   onClick={() => openRebindPanel(a)}

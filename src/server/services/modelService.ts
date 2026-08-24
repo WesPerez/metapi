@@ -53,6 +53,10 @@ let inFlightRefreshModelsAndRebuildRoutes: Promise<{
   rebuild: Awaited<ReturnType<typeof rebuildTokenRoutesFromAvailability>>;
 }> | null = null;
 
+function isStandaloneCheckinMode(): boolean {
+  return config.checkinAppMode || process.env.CHECKIN_APP_MODE === 'true';
+}
+
 type ModelRefreshErrorCode = 'timeout' | 'unauthorized' | 'empty_models' | 'unknown';
 type ModelRefreshSkipCode = 'site_disabled' | 'adapter_or_status';
 
@@ -618,9 +622,10 @@ export async function refreshModelsForAccount(
   const oauth = getOauthInfoFromAccount(account);
   const adapter = getAdapter(site.platform);
   const accountProxyUrl = resolveProxyUrlFromExtraConfig(account.extraConfig);
+  const standaloneCheckinMode = isStandaloneCheckinMode();
 
   const restoreAvailabilityOnFailure = options?.allowInactive === true;
-  const previousAccountTokens = restoreAvailabilityOnFailure
+  const previousAccountTokens = restoreAvailabilityOnFailure && !standaloneCheckinMode
     ? await db.select()
       .from(schema.accountTokens)
       .where(eq(schema.accountTokens.accountId, accountId))
@@ -635,7 +640,7 @@ export async function refreshModelsForAccount(
       ))
       .all()
     : [];
-  const previousTokenModelAvailability = restoreAvailabilityOnFailure
+  const previousTokenModelAvailability = restoreAvailabilityOnFailure && !standaloneCheckinMode
     ? (await Promise.all(previousAccountTokens.map(async (token) => db.select()
       .from(schema.tokenModelAvailability)
       .where(eq(schema.tokenModelAvailability.tokenId, token.id))
@@ -650,15 +655,17 @@ export async function refreshModelsForAccount(
       ))
       .run();
 
-    const currentAccountTokens = await db.select({ id: schema.accountTokens.id })
-      .from(schema.accountTokens)
-      .where(eq(schema.accountTokens.accountId, accountId))
-      .all();
+    if (!standaloneCheckinMode) {
+      const currentAccountTokens = await db.select({ id: schema.accountTokens.id })
+        .from(schema.accountTokens)
+        .where(eq(schema.accountTokens.accountId, accountId))
+        .all();
 
-    for (const token of currentAccountTokens) {
-      await db.delete(schema.tokenModelAvailability)
-        .where(eq(schema.tokenModelAvailability.tokenId, token.id))
-        .run();
+      for (const token of currentAccountTokens) {
+        await db.delete(schema.tokenModelAvailability)
+          .where(eq(schema.tokenModelAvailability.tokenId, token.id))
+          .run();
+      }
     }
   };
 
@@ -670,7 +677,7 @@ export async function refreshModelsForAccount(
         previousModelAvailability.map(({ id: _id, ...row }) => row),
       ).run();
     }
-    if (previousTokenModelAvailability.length > 0) {
+    if (!standaloneCheckinMode && previousTokenModelAvailability.length > 0) {
       await db.insert(schema.tokenModelAvailability).values(
         previousTokenModelAvailability.map(({ id: _id, ...row }) => row),
       ).run();
@@ -1065,7 +1072,7 @@ export async function refreshModelsForAccount(
   const platformUserId = resolvePlatformUserId(account.extraConfig, account.username);
   let discoveredApiToken: string | null = null;
 
-  if (!account.apiToken && account.accessToken) {
+  if (!standaloneCheckinMode && !account.apiToken && account.accessToken) {
     try {
       discoveredApiToken = await withTimeout(
         () => withAccountProxyOverride(accountProxyUrl,
@@ -1085,7 +1092,7 @@ export async function refreshModelsForAccount(
     } catch { }
   }
 
-  const usesManagedTokens = requiresManagedAccountTokens(account);
+  const usesManagedTokens = !standaloneCheckinMode && requiresManagedAccountTokens(account);
   let enabledTokens = usesManagedTokens
     ? await db.select()
       .from(schema.accountTokens)
@@ -1192,9 +1199,11 @@ export async function refreshModelsForAccount(
     mergeDiscoveredModels(models, latencyMs);
   };
 
-  // Prefer account-level credential discovery so model availability does not rely on managed tokens.
-  await discoverModelsWithCredential(account.apiToken);
-  await discoverModelsWithCredential(discoveredApiToken);
+  // The standalone app discovers models directly with the saved login session.
+  if (!standaloneCheckinMode) {
+    await discoverModelsWithCredential(account.apiToken);
+    await discoverModelsWithCredential(discoveredApiToken);
+  }
   await discoverModelsWithCredential(account.accessToken);
 
   for (const token of enabledTokens) {
@@ -1308,7 +1317,7 @@ async function refreshModelsForAllActiveAccounts(): Promise<ModelRefreshResult[]
 }
 
 export async function rebuildTokenRoutesFromAvailability() {
-  if (process.env.CHECKIN_APP_MODE === 'true') {
+  if (isStandaloneCheckinMode()) {
     return { models: 0, createdRoutes: 0, createdChannels: 0, removedChannels: 0, removedRoutes: 0 };
   }
   const tokenRows = await db.select().from(schema.tokenModelAvailability)

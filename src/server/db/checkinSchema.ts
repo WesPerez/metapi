@@ -9,7 +9,7 @@
  *
  * - authentication / password settings
  * - sites and site API endpoints (needed to add a site while creating an account)
- * - accounts, account tokens, model availability caches and check-in history
+ * - accounts, account model availability caches and check-in history
  * - settings for authentication, scheduling and the system proxy
  *
  * Tables that belong to proxy logging, usage aggregation, admin snapshots,
@@ -17,7 +17,7 @@
  * journal are intentionally not part of the standalone schema.
  */
 
-export const CHECKIN_SCHEMA_VERSION = 1;
+export const CHECKIN_SCHEMA_VERSION = 2;
 
 /**
  * Business settings retained by the standalone app. Everything else belonged
@@ -37,10 +37,8 @@ export const CHECKIN_RETAINED_TABLES = [
   'site_api_endpoints',
   'site_disabled_models',
   'accounts',
-  'account_tokens',
   'checkin_logs',
   'model_availability',
-  'token_model_availability',
   'settings',
 ] as const;
 
@@ -51,6 +49,9 @@ export const CHECKIN_RETAINED_TABLES = [
  */
 export const CHECKIN_RETIRED_TABLES = [
   '__drizzle_migrations',
+  // Drop the dependent model rows before their account-token parents.
+  'token_model_availability',
+  'account_tokens',
   'route_group_sources',
   'route_channels',
   'token_routes',
@@ -136,19 +137,6 @@ export const CHECKIN_TABLE_DDL: Record<string, string> = {
   "oauth_account_key" text,
   "oauth_project_id" text
 )`,
-  account_tokens: `CREATE TABLE IF NOT EXISTS "account_tokens" (
-  "id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-  "account_id" integer NOT NULL REFERENCES "accounts"("id") ON DELETE cascade,
-  "name" text NOT NULL,
-  "token" text NOT NULL,
-  "source" text DEFAULT 'manual',
-  "enabled" integer DEFAULT true,
-  "is_default" integer DEFAULT false,
-  "created_at" text DEFAULT (datetime('now')),
-  "updated_at" text DEFAULT (datetime('now')),
-  "token_group" text,
-  "value_status" text DEFAULT 'ready' NOT NULL
-)`,
   checkin_logs: `CREATE TABLE IF NOT EXISTS "checkin_logs" (
   "id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
   "account_id" integer NOT NULL REFERENCES "accounts"("id") ON DELETE cascade,
@@ -165,14 +153,6 @@ export const CHECKIN_TABLE_DDL: Record<string, string> = {
   "latency_ms" integer,
   "checked_at" text DEFAULT (datetime('now')),
   "is_manual" integer DEFAULT false
-)`,
-  token_model_availability: `CREATE TABLE IF NOT EXISTS "token_model_availability" (
-  "id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-  "token_id" integer NOT NULL REFERENCES "account_tokens"("id") ON DELETE cascade,
-  "model_name" text NOT NULL,
-  "available" integer,
-  "latency_ms" integer,
-  "checked_at" text DEFAULT (datetime('now'))
 )`,
   settings: `CREATE TABLE IF NOT EXISTS "settings" (
   "key" text PRIMARY KEY NOT NULL,
@@ -193,17 +173,10 @@ export const CHECKIN_INDEX_DDL: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS "accounts_site_status_idx" ON "accounts" ("site_id","status")',
   'CREATE INDEX IF NOT EXISTS "accounts_oauth_provider_idx" ON "accounts" ("oauth_provider")',
   'CREATE INDEX IF NOT EXISTS "accounts_oauth_identity_idx" ON "accounts" ("oauth_provider","oauth_account_key","oauth_project_id")',
-  'CREATE INDEX IF NOT EXISTS "account_tokens_account_id_idx" ON "account_tokens" ("account_id")',
-  'CREATE INDEX IF NOT EXISTS "account_tokens_account_enabled_idx" ON "account_tokens" ("account_id","enabled")',
-  'CREATE INDEX IF NOT EXISTS "account_tokens_enabled_idx" ON "account_tokens" ("enabled")',
   'CREATE INDEX IF NOT EXISTS "checkin_logs_account_created_at_idx" ON "checkin_logs" ("account_id","created_at")',
   'CREATE INDEX IF NOT EXISTS "checkin_logs_created_at_idx" ON "checkin_logs" ("created_at")',
   'CREATE INDEX IF NOT EXISTS "checkin_logs_status_idx" ON "checkin_logs" ("status")',
   'CREATE UNIQUE INDEX IF NOT EXISTS "model_availability_account_model_unique" ON "model_availability" ("account_id","model_name")',
   'CREATE INDEX IF NOT EXISTS "model_availability_account_available_idx" ON "model_availability" ("account_id","available")',
   'CREATE INDEX IF NOT EXISTS "model_availability_model_name_idx" ON "model_availability" ("model_name")',
-  'CREATE UNIQUE INDEX IF NOT EXISTS "token_model_availability_token_model_unique" ON "token_model_availability" ("token_id","model_name")',
-  'CREATE INDEX IF NOT EXISTS "token_model_availability_token_available_idx" ON "token_model_availability" ("token_id","available")',
-  'CREATE INDEX IF NOT EXISTS "token_model_availability_model_name_idx" ON "token_model_availability" ("model_name")',
-  'CREATE INDEX IF NOT EXISTS "token_model_availability_available_idx" ON "token_model_availability" ("available")',
 ];

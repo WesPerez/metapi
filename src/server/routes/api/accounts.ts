@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { db, schema, runtimeDbDialect } from "../../db/index.js";
+import { config } from "../../config.js";
 import { insertAndGetById } from "../../db/insertHelpers.js";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { analyzePrimarySiteUrl } from "../../../shared/sitePrimaryUrl.js";
@@ -588,19 +589,21 @@ export async function accountsRoutes(app: FastifyInstance) {
 
       const guessedPlatformUserId = guessPlatformUserIdFromUsername(username);
 
-      // Auto-fetch API token(s)
+      // API-key management is not part of the standalone check-in app.
       let apiTokens: Array<{
         name?: string | null;
         key?: string | null;
         enabled?: boolean | null;
       }> = [];
-      try {
-        apiTokens = await adapter.getApiTokens(
-          site.url,
-          loginResult.accessToken,
-          guessedPlatformUserId,
-        );
-      } catch {}
+      if (!config.checkinAppMode) {
+        try {
+          apiTokens = await adapter.getApiTokens(
+            site.url,
+            loginResult.accessToken,
+            guessedPlatformUserId,
+          );
+        } catch {}
+      }
 
       const preferredApiToken =
         apiTokens.find((token) => token.enabled !== false && token.key)?.key ||
@@ -640,7 +643,7 @@ export async function accountsRoutes(app: FastifyInstance) {
           .update(schema.accounts)
           .set({
             accessToken: loginResult.accessToken,
-            apiToken: preferredApiToken || undefined,
+            apiToken: config.checkinAppMode ? null : preferredApiToken || undefined,
             checkinEnabled: true,
             status: "active",
             extraConfig,
@@ -1465,14 +1468,16 @@ export async function accountsRoutes(app: FastifyInstance) {
       const account = row.accounts;
       const site = row.sites;
       const updates: any = {};
+      const editableCredentialKeys = config.checkinAppMode
+        ? []
+        : ["accessToken", "apiToken"];
       for (const key of [
         "username",
-        "accessToken",
-        "apiToken",
         "status",
         "checkinEnabled",
         "unitCost",
         "extraConfig",
+        ...editableCredentialKeys,
       ]) {
         if (body[key] !== undefined) updates[key] = body[key];
       }

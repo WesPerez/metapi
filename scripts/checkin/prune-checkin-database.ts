@@ -84,6 +84,7 @@ async function main(): Promise<void> {
       db: realpathSync(options.dbPath),
       droppedTables: result?.droppedTables ?? [],
       deletedSettingsKeys: result?.deletedSettingsKeys ?? [],
+      clearedApiTokens: result?.clearedApiTokens ?? 0,
       retiredSettingsKeysRemaining: settingsKeys.filter((key) => !CHECKIN_SETTINGS_KEYS.includes(key as never)),
       retiredTablesRemaining: CHECKIN_RETIRED_TABLES.filter((table) => tables.includes(table)),
       tables,

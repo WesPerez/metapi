@@ -17,6 +17,7 @@ export type CheckinBootstrapResult = {
   createdIndexes: number;
   droppedTables: string[];
   deletedSettingsKeys: string[];
+  clearedApiTokens: number;
   retainedTables: string[];
   extraTables: string[];
   schemaVersion: number;
@@ -112,10 +113,13 @@ function checkinIndexName(statement: string): string {
 function tableDigest(db: Database.Database, table: string): string {
   const rows = db.prepare('SELECT * FROM ' + quoteIdentifier(table)).all() as Array<Record<string, unknown>>;
   const serialized = rows
-    .map((row) => JSON.stringify(row, (_key, value: unknown) => {
-      if (Buffer.isBuffer(value)) return { type: 'Buffer', data: value.toString('base64') };
-      return value;
-    }))
+    .map((row) => JSON.stringify(
+      table === 'accounts' ? { ...row, api_token: null } : row,
+      (_key, value: unknown) => {
+        if (Buffer.isBuffer(value)) return { type: 'Buffer', data: value.toString('base64') };
+        return value;
+      },
+    ))
     .sort()
     .join('\n');
   return createHash('sha256').update(serialized).digest('hex');
@@ -171,18 +175,26 @@ function readSchemaVersion(db: Database.Database): number {
   return Number(db.pragma('user_version', { simple: true }));
 }
 
-function validateSchemaVersion(db: Database.Database): void {
+function validateSchemaVersion(db: Database.Database, allowLegacyV1 = false): void {
   const version = readSchemaVersion(db);
   // Zero is the SQLite default for a new database and for an older full
   // MetAPI database being adopted by the standalone tools. Any other version
   // requires explicit schema evolution rather than a silent overwrite.
-  if (version !== 0 && version !== CHECKIN_SCHEMA_VERSION) {
-    throw new Error('Unsupported check-in schema version: expected 0 or ' + CHECKIN_SCHEMA_VERSION + ', got ' + version);
+  const allowedVersions = allowLegacyV1
+    ? [0, 1, CHECKIN_SCHEMA_VERSION]
+    : [0, CHECKIN_SCHEMA_VERSION];
+  if (!allowedVersions.includes(version)) {
+    throw new Error(
+      'Unsupported check-in schema version: expected '
+      + allowedVersions.join(', ')
+      + ', got '
+      + version,
+    );
   }
 }
 
-function writeSchemaVersion(db: Database.Database): void {
-  validateSchemaVersion(db);
+function writeSchemaVersion(db: Database.Database, allowLegacyV1 = false): void {
+  validateSchemaVersion(db, allowLegacyV1);
   if (readSchemaVersion(db) !== CHECKIN_SCHEMA_VERSION) {
     db.pragma('user_version = ' + CHECKIN_SCHEMA_VERSION);
   }
@@ -196,6 +208,7 @@ export function ensureCheckinDatabaseSchema(
   let createdIndexes = 0;
   const droppedTables: string[] = [];
   const deletedSettingsKeys: string[] = [];
+  let clearedApiTokens = 0;
 
   db.pragma('foreign_keys = ON');
   integrityCheck(db);
@@ -203,7 +216,8 @@ export function ensureCheckinDatabaseSchema(
   const missingTables = CHECKIN_RETAINED_TABLES.filter((table) => !tableExists(db, table));
   const presentTables = CHECKIN_RETAINED_TABLES.filter((table) => tableExists(db, table));
   validateSchemaShape(db, presentTables);
-  validateSchemaVersion(db);
+  const allowLegacyV1 = options.prune === true || options.readonly === true;
+  validateSchemaVersion(db, allowLegacyV1);
 
   const presentRetainedBefore = CHECKIN_RETAINED_TABLES.filter((table) => tableExists(db, table));
   const beforeSnapshots = protectedSnapshots(db, presentRetainedBefore);
@@ -241,6 +255,9 @@ export function ensureCheckinDatabaseSchema(
         db.prepare('DELETE FROM settings WHERE "key" = ?').run(key);
         deletedSettingsKeys.push(key);
       }
+      clearedApiTokens = db.prepare(
+        'UPDATE accounts SET api_token = NULL WHERE api_token IS NOT NULL',
+      ).run().changes;
     });
     transaction();
     integrityCheck(db);
@@ -266,9 +283,9 @@ export function ensureCheckinDatabaseSchema(
   validateSchemaShape(db, CHECKIN_RETAINED_TABLES);
 
   if (options.readonly) {
-    validateSchemaVersion(db);
+    validateSchemaVersion(db, true);
   } else {
-    writeSchemaVersion(db);
+    writeSchemaVersion(db, options.prune === true);
   }
 
   integrityCheck(db);
@@ -290,6 +307,7 @@ export function ensureCheckinDatabaseSchema(
     createdIndexes,
     droppedTables,
     deletedSettingsKeys,
+    clearedApiTokens,
     retainedTables: CHECKIN_RETAINED_TABLES.filter((table) => tables.includes(table)),
     extraTables,
     schemaVersion: CHECKIN_SCHEMA_VERSION,

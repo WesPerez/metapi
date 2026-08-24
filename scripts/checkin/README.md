@@ -1,7 +1,7 @@
 # Check-in Database Tools
 
 These helpers define the smaller SQLite contract used by the standalone
-check-in deployment. They create the exact 9-table schema, validate it against
+check-in deployment. They create the exact 7-table schema, validate it against
 the embedded DDL, and can prune retired tables from an older full MetAPI
 database after making a backup.
 
@@ -31,16 +31,19 @@ plus `foreign_key_check`. `--vacuum` is optional and should only be used when
 no other process is writing the database.
 
 Retained tables are `sites`, `site_api_endpoints`, `site_disabled_models`,
-`accounts`, `account_tokens`, `checkin_logs`, `model_availability`,
-`token_model_availability`, and `settings`. The prune operation physically drops
+`accounts`, `checkin_logs`, `model_availability`, and `settings`. The prune operation physically drops
 the migration journal, proxy routing/event tables, OAuth route-unit tables,
 proxy/debug/file/video tables, usage aggregates, downstream keys, admin
-snapshots, and announcement caches. It refuses an unknown table or schema drift
-instead of guessing.
+snapshots, announcement caches, account API-key tokens, and token-specific model
+availability. Version 2 pruning also clears the retired `accounts.api_token`
+values while preserving the account login-session `access_token` values. It
+refuses an unknown table or schema drift instead of guessing.
 
 Schema version metadata is stored in SQLite `PRAGMA user_version`, not in the
 `settings` business table. Writable initialization and prune runs set it to
-the standalone schema version; readonly validation never changes it.
+the standalone schema version; readonly validation never changes it. A version
+1 database must be upgraded with an explicit prune so token data cannot be
+discarded silently during application startup.
 
 The only retained settings keys are `auth_token`, `checkin_cron`,
 `checkin_schedule_mode`, `checkin_interval_hours`, and

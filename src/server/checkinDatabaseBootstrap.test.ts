@@ -27,7 +27,7 @@ describe('standalone check-in database bootstrap', () => {
     try {
       const first = ensureCheckinDatabaseSchema(db);
       expect(first.createdTables).toEqual([...CHECKIN_RETAINED_TABLES]);
-      expect(CHECKIN_RETAINED_TABLES).toHaveLength(9);
+      expect(CHECKIN_RETAINED_TABLES).toHaveLength(7);
       expect(tables(db)).toEqual([...CHECKIN_RETAINED_TABLES].sort());
       expect(first.extraTables).toEqual([]);
       expect(db.pragma('user_version', { simple: true })).toBe(CHECKIN_SCHEMA_VERSION);
@@ -50,6 +50,17 @@ describe('standalone check-in database bootstrap', () => {
     try {
       db.pragma('foreign_keys = ON');
       ensureCheckinDatabaseSchema(db);
+      db.exec(`CREATE TABLE account_tokens (
+        id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+        account_id integer NOT NULL REFERENCES accounts(id) ON DELETE cascade,
+        name text NOT NULL,
+        token text NOT NULL
+      )`);
+      db.exec(`CREATE TABLE token_model_availability (
+        id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+        token_id integer NOT NULL REFERENCES account_tokens(id) ON DELETE cascade,
+        model_name text NOT NULL
+      )`);
       db.exec('CREATE TABLE __drizzle_migrations (id integer PRIMARY KEY, hash text NOT NULL, created_at integer)');
       db.exec('CREATE TABLE proxy_logs (id integer PRIMARY KEY, payload text)');
       db.exec('CREATE TABLE token_routes (id integer PRIMARY KEY)');
@@ -57,8 +68,11 @@ describe('standalone check-in database bootstrap', () => {
       db.exec('CREATE TABLE events (id integer PRIMARY KEY)');
       db.exec('INSERT INTO sites (name, url, platform) VALUES (\'New API\', \'https://new.example\', \'new-api\')');
       const siteId = Number((db.prepare('SELECT id FROM sites LIMIT 1').get() as { id: number }).id);
-      db.prepare('INSERT INTO accounts (site_id, access_token) VALUES (?, ?)').run(siteId, 'secret');
+      db.prepare('INSERT INTO accounts (site_id, access_token, api_token) VALUES (?, ?, ?)').run(siteId, 'secret', 'retired-api-key');
       const accountId = Number((db.prepare('SELECT id FROM accounts LIMIT 1').get() as { id: number }).id);
+      db.prepare('INSERT INTO account_tokens (account_id, name, token) VALUES (?, ?, ?)').run(accountId, 'default', 'retired-api-key');
+      const tokenId = Number((db.prepare('SELECT id FROM account_tokens LIMIT 1').get() as { id: number }).id);
+      db.prepare('INSERT INTO token_model_availability (token_id, model_name) VALUES (?, ?)').run(tokenId, 'retired-model');
       db.prepare('INSERT INTO checkin_logs (account_id, status, message) VALUES (?, ?, ?)').run(accountId, 'success', 'ok');
       for (const [key, value] of [
         ['auth_token', 'session-secret'],
@@ -68,14 +82,28 @@ describe('standalone check-in database bootstrap', () => {
       const protectedSettingsBefore = JSON.stringify(protectedSettings(db));
       db.prepare('INSERT INTO proxy_logs (payload) VALUES (?)').run('old');
       db.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run('old', 1);
+      db.pragma('user_version = 1');
 
       const result = ensureCheckinDatabaseSchema(db, { prune: true });
-      expect(result.droppedTables).toEqual(['__drizzle_migrations', 'route_channels', 'token_routes', 'proxy_logs', 'events']);
+      expect(result.droppedTables).toEqual([
+        '__drizzle_migrations',
+        'token_model_availability',
+        'account_tokens',
+        'route_channels',
+        'token_routes',
+        'proxy_logs',
+        'events',
+      ]);
       expect(result.deletedSettingsKeys).toEqual(['legacy_proxy']);
+      expect(result.clearedApiTokens).toBe(1);
       expect(tables(db)).toEqual([...CHECKIN_RETAINED_TABLES].sort());
       expect(CHECKIN_RETIRED_TABLES.every((table) => !tables(db).includes(table))).toBe(true);
       expect(Number((db.prepare('SELECT count(*) AS count FROM sites').get() as { count: number }).count)).toBe(1);
       expect(Number((db.prepare('SELECT count(*) AS count FROM accounts').get() as { count: number }).count)).toBe(1);
+      expect(db.prepare('SELECT access_token, api_token FROM accounts').get()).toEqual({
+        access_token: 'secret',
+        api_token: null,
+      });
       expect(Number((db.prepare('SELECT count(*) AS count FROM checkin_logs').get() as { count: number }).count)).toBe(1);
       expect(JSON.stringify(protectedSettings(db))).toBe(protectedSettingsBefore);
       expect(db.prepare('SELECT key, value FROM settings ORDER BY key').all()).toEqual([
@@ -88,6 +116,7 @@ describe('standalone check-in database bootstrap', () => {
       const idempotent = ensureCheckinDatabaseSchema(db, { prune: true });
       expect(idempotent.droppedTables).toEqual([]);
       expect(idempotent.deletedSettingsKeys).toEqual([]);
+      expect(idempotent.clearedApiTokens).toBe(0);
     } finally {
       db.close();
     }
@@ -133,6 +162,19 @@ describe('standalone check-in database bootstrap', () => {
       db.pragma('user_version = 99');
       expect(() => ensureCheckinDatabaseSchema(db, { readonly: true })).toThrow(/Unsupported check-in schema version/u);
       expect(db.pragma('user_version', { simple: true })).toBe(99);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('requires an explicit prune to upgrade a version 1 database', () => {
+    const db = new Database(':memory:');
+    try {
+      ensureCheckinDatabaseSchema(db);
+      db.pragma('user_version = 1');
+      expect(() => ensureCheckinDatabaseSchema(db)).toThrow(/Unsupported check-in schema version/u);
+      expect(() => ensureCheckinDatabaseSchema(db, { readonly: true })).not.toThrow();
+      expect(db.pragma('user_version', { simple: true })).toBe(1);
     } finally {
       db.close();
     }

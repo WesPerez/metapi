@@ -116,10 +116,17 @@ describe('accountMutationWorkflow', () => {
       const { convergeAccountMutation, rebuildRoutesBestEffort } = await import('./accountMutationWorkflow.js');
       const result = await convergeAccountMutation({
         accountId: 30,
+        preferredApiToken: 'retired-api-key',
+        ensurePreferredTokenBeforeSync: true,
+        upstreamTokens: [{ name: 'default', key: 'retired-api-key' }],
         rebuildRoutes: true,
       });
 
       expect(result.rebuiltRoutes).toBe(false);
+      expect(result.defaultTokenId).toBeNull();
+      expect(result.tokenSync).toBeNull();
+      expect(ensureDefaultTokenForAccountMock).not.toHaveBeenCalled();
+      expect(syncTokensFromUpstreamMock).not.toHaveBeenCalled();
       expect(rebuildTokenRoutesFromAvailabilityMock).not.toHaveBeenCalled();
       await expect(rebuildRoutesBestEffort()).resolves.toBe(true);
       expect(rebuildTokenRoutesFromAvailabilityMock).not.toHaveBeenCalled();

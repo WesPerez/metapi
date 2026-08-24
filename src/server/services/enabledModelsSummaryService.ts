@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
+import { config } from "../config.js";
 
 type SiteModelRow = {
   siteId: number;
@@ -111,15 +112,7 @@ export async function getEnabledModelsBySite(siteIds?: number[]) {
           eq(schema.modelAvailability.available, true),
         )
       : eq(schema.modelAvailability.available, true);
-  const tokenModelWhere =
-    normalizedSiteIds && normalizedSiteIds.length > 0
-      ? and(
-          inArray(schema.accounts.siteId, normalizedSiteIds),
-          eq(schema.tokenModelAvailability.available, true),
-        )
-      : eq(schema.tokenModelAvailability.available, true);
-
-  const accountModelsQuery = db
+  const accountModels = await db
     .select({
       siteId: schema.accounts.siteId,
       modelName: schema.modelAvailability.modelName,
@@ -129,27 +122,33 @@ export async function getEnabledModelsBySite(siteIds?: number[]) {
       schema.accounts,
       eq(schema.modelAvailability.accountId, schema.accounts.id),
     )
-    .where(accountModelWhere);
-  const tokenModelsQuery = db
-    .select({
-      siteId: schema.accounts.siteId,
-      modelName: schema.tokenModelAvailability.modelName,
-    })
-    .from(schema.tokenModelAvailability)
-    .innerJoin(
-      schema.accountTokens,
-      eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id),
-    )
-    .innerJoin(
-      schema.accounts,
-      eq(schema.accountTokens.accountId, schema.accounts.id),
-    )
-    .where(tokenModelWhere);
-
-  const [accountModels, tokenModels] = await Promise.all([
-    accountModelsQuery.all() as Promise<SiteModelRow[]>,
-    tokenModelsQuery.all() as Promise<SiteModelRow[]>,
-  ]);
+    .where(accountModelWhere)
+    .all() as SiteModelRow[];
+  const tokenModels: SiteModelRow[] = config.checkinAppMode
+    ? []
+    : await db
+        .select({
+          siteId: schema.accounts.siteId,
+          modelName: schema.tokenModelAvailability.modelName,
+        })
+        .from(schema.tokenModelAvailability)
+        .innerJoin(
+          schema.accountTokens,
+          eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id),
+        )
+        .innerJoin(
+          schema.accounts,
+          eq(schema.accountTokens.accountId, schema.accounts.id),
+        )
+        .where(
+          normalizedSiteIds && normalizedSiteIds.length > 0
+            ? and(
+                inArray(schema.accounts.siteId, normalizedSiteIds),
+                eq(schema.tokenModelAvailability.available, true),
+              )
+            : eq(schema.tokenModelAvailability.available, true),
+        )
+        .all();
 
   for (const row of [...accountModels, ...tokenModels]) {
     addModel(siteModelMap, row.siteId, row.modelName, disabledBySite);
@@ -213,25 +212,17 @@ export async function getEnabledModelsByAccount(accountIds?: number[]) {
           eq(schema.modelAvailability.available, true),
         )
       : eq(schema.modelAvailability.available, true);
-  const tokenModelWhere =
-    normalizedAccountIds && normalizedAccountIds.length > 0
-      ? and(
-          inArray(schema.accountTokens.accountId, normalizedAccountIds),
-          eq(schema.tokenModelAvailability.available, true),
-        )
-      : eq(schema.tokenModelAvailability.available, true);
-
-  const [accountModels, tokenModels]: [AccountModelRow[], AccountModelRow[]] =
-    await Promise.all([
-      db
-        .select({
-          accountId: schema.modelAvailability.accountId,
-          modelName: schema.modelAvailability.modelName,
-        })
-        .from(schema.modelAvailability)
-        .where(accountModelWhere)
-        .all(),
-      db
+  const accountModels: AccountModelRow[] = await db
+    .select({
+      accountId: schema.modelAvailability.accountId,
+      modelName: schema.modelAvailability.modelName,
+    })
+    .from(schema.modelAvailability)
+    .where(accountModelWhere)
+    .all();
+  const tokenModels: AccountModelRow[] = config.checkinAppMode
+    ? []
+    : await db
         .select({
           accountId: schema.accountTokens.accountId,
           modelName: schema.tokenModelAvailability.modelName,
@@ -241,9 +232,15 @@ export async function getEnabledModelsByAccount(accountIds?: number[]) {
           schema.accountTokens,
           eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id),
         )
-        .where(tokenModelWhere)
-        .all(),
-    ]);
+        .where(
+          normalizedAccountIds && normalizedAccountIds.length > 0
+            ? and(
+                inArray(schema.accountTokens.accountId, normalizedAccountIds),
+                eq(schema.tokenModelAvailability.available, true),
+              )
+            : eq(schema.tokenModelAvailability.available, true),
+        )
+        .all();
 
   for (const row of accountModels) {
     addAccountModel(

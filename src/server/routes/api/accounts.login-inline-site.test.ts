@@ -72,6 +72,11 @@ describe('accounts login inline site creation/reuse', () => {
   });
 
   it('normalizes an inline site URL when siteId is omitted', async () => {
+    getApiTokensMock.mockResolvedValueOnce([
+      { name: 'disabled', key: 'sk-disabled', enabled: false },
+      { name: 'active', key: 'sk-active', enabled: true },
+    ]);
+
     const response = await app.inject({
       method: 'POST',
       url: '/api/accounts/login',
@@ -94,6 +99,7 @@ describe('accounts login inline site creation/reuse', () => {
     const accounts = await db.select().from(schema.accounts).all();
     expect(accounts).toHaveLength(1);
     expect(accounts[0].siteId).toBe(sites[0].id);
+    expect(accounts[0].apiToken).toBe('sk-active');
 
     // The adapter receives the normalized URL, not the raw inline input.
     expect(loginMock).toHaveBeenCalledWith(
@@ -101,6 +107,8 @@ describe('accounts login inline site creation/reuse', () => {
       'demo-user',
       'demo-password',
     );
+    expect(getApiTokensMock).toHaveBeenCalledTimes(1);
+    expect(getApiTokenMock).not.toHaveBeenCalled();
   });
 
   it('reuses an existing hidden site when platform and normalized URL match', async () => {

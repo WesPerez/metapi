@@ -130,7 +130,7 @@ describe('checkinService auto relogin', () => {
     expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'fresh-token' }));
   });
 
-  it('retries transient gateway failures up to a successful response', async () => {
+  it('limits transient gateway retries to one replay', async () => {
     selectAllMock.mockReturnValue([
       {
         accounts: {
@@ -150,16 +150,56 @@ describe('checkinService auto relogin', () => {
     ]);
     adapterMock.checkin
       .mockResolvedValueOnce({ success: false, message: 'HTTP 504: gateway timeout' })
-      .mockResolvedValueOnce({ success: false, message: 'HTTP 503: upstream unavailable' })
-      .mockResolvedValueOnce({ success: true, message: 'checked in' });
-    refreshBalanceMock.mockResolvedValue({ balance: 1 });
+      .mockResolvedValueOnce({ success: false, message: 'HTTP 503: upstream unavailable' });
 
     const { checkinAccount } = await import('./checkinService.js');
     const result = await checkinAccount(31);
 
-    expect(result.success).toBe(true);
-    expect(adapterMock.checkin).toHaveBeenCalledTimes(3);
+    expect(result.success).toBe(false);
+    expect(adapterMock.checkin).toHaveBeenCalledTimes(2);
     expect(adapterMock.login).not.toHaveBeenCalled();
+  });
+
+  it('shares one in-flight checkin for concurrent requests to the same account', async () => {
+    selectAllMock.mockReturnValue([
+      {
+        accounts: {
+          id: 34,
+          username: 'singleflight-user',
+          accessToken: 'token',
+          status: 'active',
+          extraConfig: null,
+        },
+        sites: {
+          id: 7,
+          name: 'singleflight-site',
+          url: 'https://singleflight.example.com',
+          platform: 'new-api',
+        },
+      },
+    ]);
+    let resolveCheckin: (value: { success: boolean; message: string }) => void = () => {};
+    adapterMock.checkin.mockImplementation(() => new Promise((resolve) => {
+      resolveCheckin = resolve;
+    }));
+    refreshBalanceMock.mockResolvedValue({ balance: 1, used: 0, quota: 1 });
+
+    const { checkinAccount } = await import('./checkinService.js');
+    const first = checkinAccount(34);
+    const second = checkinAccount(34);
+
+    expect(second).toBe(first);
+    await vi.waitFor(() => {
+      expect(adapterMock.checkin).toHaveBeenCalledTimes(1);
+    });
+    resolveCheckin({ success: true, message: 'checked in' });
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    expect(adapterMock.checkin).toHaveBeenCalledTimes(1);
+    expect(refreshBalanceMock).toHaveBeenCalledTimes(1);
+    expect(refreshBalanceMock).toHaveBeenCalledWith(34, {
+      includeTodayIncomeLogFallback: false,
+    });
+    expect(insertValuesMock).toHaveBeenCalledTimes(2);
   });
 
   it('does not multiply retries after the egress gateway exhausts its attempts', async () => {

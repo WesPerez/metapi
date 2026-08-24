@@ -107,6 +107,27 @@ describe('accountMutationWorkflow', () => {
     expect(rebuildTokenRoutesFromAvailabilityMock).toHaveBeenCalledTimes(1);
   });
 
+  it('skips proxy route rebuilds in standalone check-in mode', async () => {
+    const { config } = await import('../config.js');
+    const previousMode = config.checkinAppMode;
+    config.checkinAppMode = true;
+
+    try {
+      const { convergeAccountMutation, rebuildRoutesBestEffort } = await import('./accountMutationWorkflow.js');
+      const result = await convergeAccountMutation({
+        accountId: 30,
+        rebuildRoutes: true,
+      });
+
+      expect(result.rebuiltRoutes).toBe(false);
+      expect(rebuildTokenRoutesFromAvailabilityMock).not.toHaveBeenCalled();
+      await expect(rebuildRoutesBestEffort()).resolves.toBe(true);
+      expect(rebuildTokenRoutesFromAvailabilityMock).not.toHaveBeenCalled();
+    } finally {
+      config.checkinAppMode = previousMode;
+    }
+  });
+
   it('only marks refreshedModels when the refresh result explicitly says it refreshed', async () => {
     refreshModelsForAccountMock.mockResolvedValue({ accountId: 4, refreshed: false, status: 'skipped' });
 

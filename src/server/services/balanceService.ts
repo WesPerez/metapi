@@ -22,6 +22,7 @@ import {
   isSub2ApiPlatform,
 } from './sub2apiManagedAuth.js';
 import { refreshSub2ApiManagedSessionSingleflight } from './sub2apiRefreshSingleflight.js';
+import { config } from '../config.js';
 
 function isSiteDisabled(status?: string | null): boolean {
   return (status || 'active') === 'disabled';
@@ -68,6 +69,17 @@ function isUnsupportedCheckinRuntimeHealth(health: ReturnType<typeof extractRunt
 const INCOME_LOG_TYPES = [1, 4] as const;
 const LOG_PAGE_SIZE = 100;
 const LOG_MAX_PAGES = 6;
+
+export type RefreshBalanceOptions = {
+  includeTodayIncomeLogFallback?: boolean;
+};
+
+type BalanceRefreshResult = (BalanceInfo & {
+  skipped?: boolean;
+  reason?: string;
+}) | null;
+
+const balanceRefreshFlights = new Map<string, Promise<BalanceRefreshResult>>();
 
 function supportsTodayIncomeLogFallback(platform?: string | null): boolean {
   const normalized = (platform || '').toLowerCase();
@@ -236,7 +248,10 @@ async function tryAutoRelogin(account: any, site: any): Promise<string | null> {
   return loginResult.accessToken;
 }
 
-export async function refreshBalance(accountId: number) {
+async function executeBalanceRefresh(
+  accountId: number,
+  options?: RefreshBalanceOptions,
+): Promise<BalanceRefreshResult> {
   const rows = await db
     .select()
     .from(schema.accounts)
@@ -364,6 +379,7 @@ export async function refreshBalance(accountId: number) {
   }
 
   if (
+    options?.includeTodayIncomeLogFallback !== false &&
     !(typeof balanceInfo.todayIncome === 'number' && Number.isFinite(balanceInfo.todayIncome)) &&
     supportsTodayIncomeLogFallback(site.platform)
   ) {
@@ -421,6 +437,26 @@ export async function refreshBalance(accountId: number) {
   });
 
   return balanceInfo;
+}
+
+export function refreshBalance(
+  accountId: number,
+  options?: RefreshBalanceOptions,
+): Promise<BalanceRefreshResult> {
+  const includeTodayIncomeLogFallback =
+    options?.includeTodayIncomeLogFallback ?? !config.checkinAppMode;
+  const flightKey = `${accountId}:${includeTodayIncomeLogFallback ? 'income' : 'balance'}`;
+  const existing = balanceRefreshFlights.get(flightKey);
+  if (existing) return existing;
+
+  const flight = executeBalanceRefresh(accountId, { includeTodayIncomeLogFallback });
+  balanceRefreshFlights.set(flightKey, flight);
+  void flight.finally(() => {
+    if (balanceRefreshFlights.get(flightKey) === flight) {
+      balanceRefreshFlights.delete(flightKey);
+    }
+  }).catch(() => {});
+  return flight;
 }
 
 export async function refreshAllBalances() {

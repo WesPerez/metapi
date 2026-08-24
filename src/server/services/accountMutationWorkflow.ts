@@ -9,6 +9,7 @@ import {
 } from './modelService.js';
 import * as routeRefreshWorkflow from './routeRefreshWorkflow.js';
 import { ensureAccountScopedResinProxyIdentity } from './resinProxyIdentityService.js';
+import { config } from '../config.js';
 
 type UpstreamTokenLike = {
   name?: string | null;
@@ -22,6 +23,7 @@ export type CoverageBatchRebuildResult =
   | { success: false; error: string };
 
 export async function rebuildRoutesBestEffort(): Promise<boolean> {
+  if (config.checkinAppMode) return true;
   return routeRefreshWorkflow.rebuildRoutesBestEffort();
 }
 
@@ -126,7 +128,7 @@ export async function convergeAccountMutation(input: {
     }
   }
 
-  if (input.rebuildRoutes) {
+  if (input.rebuildRoutes && !config.checkinAppMode) {
     const rebuildResult = await runStep(() => routeRefreshWorkflow.rebuildRoutesOnly());
     if (rebuildResult) {
       result.rebuildResult = rebuildResult;

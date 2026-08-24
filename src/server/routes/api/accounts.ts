@@ -589,19 +589,11 @@ export async function accountsRoutes(app: FastifyInstance) {
       const guessedPlatformUserId = guessPlatformUserIdFromUsername(username);
 
       // Auto-fetch API token(s)
-      let apiToken: string | null = null;
       let apiTokens: Array<{
         name?: string | null;
         key?: string | null;
         enabled?: boolean | null;
       }> = [];
-      try {
-        apiToken = await adapter.getApiToken(
-          site.url,
-          loginResult.accessToken,
-          guessedPlatformUserId,
-        );
-      } catch {}
       try {
         apiTokens = await adapter.getApiTokens(
           site.url,
@@ -612,7 +604,7 @@ export async function accountsRoutes(app: FastifyInstance) {
 
       const preferredApiToken =
         apiTokens.find((token) => token.enabled !== false && token.key)?.key ||
-        apiToken ||
+        apiTokens.find((token) => token.key)?.key ||
         null;
       const existing = await db
         .select()

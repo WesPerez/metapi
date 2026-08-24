@@ -22,7 +22,7 @@ import { withAccountProxyOverride } from './siteProxy.js';
 import { buildNextAccountScopedResinProxyUrl } from './resinProxyIdentityService.js';
 
 type CheckinExecutionStatus = 'success' | 'failed' | 'skipped';
-const CHECKIN_MAX_ATTEMPTS = 3;
+const CHECKIN_MAX_ATTEMPTS = 2;
 
 export function isTransientCheckinFailureMessage(message?: string | null): boolean {
   if (!message) return false;
@@ -137,7 +137,7 @@ async function tryAutoRelogin(account: any, site: any): Promise<string | null> {
   return result.accessToken;
 }
 
-export async function checkinAccount(accountId: number, options?: { skipEvent?: boolean; scheduleMode?: 'cron' | 'interval' }) {
+async function executeCheckinAccount(accountId: number, options?: { skipEvent?: boolean; scheduleMode?: 'cron' | 'interval' }) {
   const rows = await db
     .select()
     .from(schema.accounts)
@@ -284,7 +284,9 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
 
     if (shouldRefreshBalance) {
       try {
-        refreshedBalanceInfo = await refreshBalance(account.id);
+        refreshedBalanceInfo = await refreshBalance(account.id, {
+          includeTodayIncomeLogFallback: false,
+        });
       } catch {}
     }
 
@@ -359,6 +361,25 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
     status: normalizedStatus,
     ...(normalizedStatus === 'skipped' ? { skipped: true } : {}),
   };
+}
+
+const checkinFlights = new Map<number, ReturnType<typeof executeCheckinAccount>>();
+
+export function checkinAccount(
+  accountId: number,
+  options?: { skipEvent?: boolean; scheduleMode?: 'cron' | 'interval' },
+): ReturnType<typeof executeCheckinAccount> {
+  const existing = checkinFlights.get(accountId);
+  if (existing) return existing;
+
+  const flight = executeCheckinAccount(accountId, options);
+  checkinFlights.set(accountId, flight);
+  void flight.finally(() => {
+    if (checkinFlights.get(accountId) === flight) {
+      checkinFlights.delete(accountId);
+    }
+  }).catch(() => {});
+  return flight;
 }
 
 export async function checkinAll(options?: { accountIds?: number[]; scheduleMode?: 'cron' | 'interval' }) {

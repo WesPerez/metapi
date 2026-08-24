@@ -144,6 +144,46 @@ describe('balanceService auto relogin', () => {
     expect(reportTokenExpiredMock).not.toHaveBeenCalled();
   });
 
+  it('shares one in-flight balance request for the same account and fallback mode', async () => {
+    selectAllMock.mockReturnValue([
+      {
+        accounts: {
+          id: 11,
+          username: 'singleflight-user',
+          accessToken: 'active-token',
+          status: 'active',
+          extraConfig: null,
+        },
+        sites: {
+          id: 11,
+          name: 'singleflight-site',
+          url: 'https://singleflight.example.com',
+          platform: 'new-api',
+        },
+      },
+    ]);
+    let resolveBalance: (value: { balance: number; used: number; quota: number }) => void = () => {};
+    adapterMock.getBalance.mockImplementation(() => new Promise((resolve) => {
+      resolveBalance = resolve;
+    }));
+
+    const { refreshBalance } = await import('./balanceService.js');
+    const first = refreshBalance(11, { includeTodayIncomeLogFallback: false });
+    const second = refreshBalance(11, { includeTodayIncomeLogFallback: false });
+
+    expect(second).toBe(first);
+    await vi.waitFor(() => {
+      expect(adapterMock.getBalance).toHaveBeenCalledTimes(1);
+    });
+    resolveBalance({ balance: 5, used: 1, quota: 6 });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { balance: 5, used: 1, quota: 6 },
+      { balance: 5, used: 1, quota: 6 },
+    ]);
+    expect(adapterMock.getBalance).toHaveBeenCalledTimes(1);
+    expect(undiciFetchMock).not.toHaveBeenCalled();
+  });
+
   it('reports token expired when relogin is unavailable', async () => {
     selectAllMock.mockReturnValue([
       {

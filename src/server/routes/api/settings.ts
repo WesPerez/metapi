@@ -160,6 +160,7 @@ async function appendSettingsEvent(input: {
   message: string;
   level?: 'info' | 'warning' | 'error';
 }) {
+  if (config.checkinAppMode) return;
   try {
     const createdAt = formatUtcSqlDateTime(new Date());
     await db.insert(schema.events).values({

@@ -1,4 +1,5 @@
 import { db, schema } from '../db/index.js';
+import { config } from '../config.js';
 import { getAdapter } from './platforms/index.js';
 import { eq, and } from 'drizzle-orm';
 import { sendNotification } from './notifyService.js';
@@ -163,7 +164,7 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
       createdAt,
     }).run();
 
-    if (!options?.skipEvent) {
+    if (!config.checkinAppMode && !options?.skipEvent) {
       await db.insert(schema.events).values({
         type: 'checkin',
         title: 'checkin skipped',
@@ -305,7 +306,7 @@ export async function checkinAccount(accountId: number, options?: { skipEvent?: 
     createdAt,
   }).run();
 
-  if (!options?.skipEvent) {
+  if (!config.checkinAppMode && !options?.skipEvent) {
     await db.insert(schema.events).values({
       type: 'checkin',
       title: effectiveSuccess

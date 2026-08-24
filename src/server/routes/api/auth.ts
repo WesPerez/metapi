@@ -49,6 +49,7 @@ export async function authRoutes(app: FastifyInstance) {
     config.authToken = newToken;
 
     try {
+      if (config.checkinAppMode) return { success: true, message: 'Token 已更新' };
       const createdAt = formatUtcSqlDateTime(new Date());
       await db.insert(schema.events).values({
         type: 'token',

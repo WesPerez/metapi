@@ -8,7 +8,7 @@ import {
   CHECKIN_RETIRED_TABLES,
   CHECKIN_RETAINED_TABLES,
   CHECKIN_SCHEMA_VERSION,
-  CHECKIN_SCHEMA_VERSION_SETTING_KEY,
+  CHECKIN_SETTINGS_KEYS,
   CHECKIN_TABLE_DDL,
 } from './db/checkinSchema.js';
 
@@ -16,6 +16,7 @@ export type CheckinBootstrapResult = {
   createdTables: string[];
   createdIndexes: number;
   droppedTables: string[];
+  deletedSettingsKeys: string[];
   retainedTables: string[];
   extraTables: string[];
   schemaVersion: number;
@@ -127,6 +128,26 @@ function tableSnapshots(db: Database.Database, tables: readonly string[]): Recor
   }));
 }
 
+function protectedSettingsSnapshot(db: Database.Database): TableSnapshot {
+  const placeholders = CHECKIN_SETTINGS_KEYS.map(() => '?').join(', ');
+  const rows = db.prepare(
+    'SELECT "key", "value" FROM settings WHERE "key" IN (' + placeholders + ') ORDER BY "key"',
+  ).all(...CHECKIN_SETTINGS_KEYS) as Array<Record<string, unknown>>;
+  const serialized = rows
+    .map((row) => JSON.stringify(row, (_key, value: unknown) => {
+      if (Buffer.isBuffer(value)) return { type: 'Buffer', data: value.toString('base64') };
+      return value;
+    }))
+    .join('\n');
+  return { count: rows.length, digest: createHash('sha256').update(serialized).digest('hex') };
+}
+
+function protectedSnapshots(db: Database.Database, tables: readonly string[]): Record<string, TableSnapshot> {
+  const snapshots = tableSnapshots(db, tables.filter((table) => table !== 'settings'));
+  if (tables.includes('settings')) snapshots.settings = protectedSettingsSnapshot(db);
+  return snapshots;
+}
+
 function assertUnchangedSnapshots(
   before: Record<string, TableSnapshot>,
   after: Record<string, TableSnapshot>,
@@ -146,10 +167,25 @@ function integrityCheck(db: Database.Database): void {
   if (foreignKeys.length > 0) throw new Error('SQLite foreign_key_check found ' + foreignKeys.length + ' issue(s)');
 }
 
-function upsertSchemaVersion(db: Database.Database): void {
-  db.prepare(
-    'INSERT INTO settings ("key", "value") VALUES (?, ?) ON CONFLICT("key") DO UPDATE SET "value" = excluded."value" WHERE settings."value" IS NULL OR settings."value" != excluded."value"',
-  ).run(CHECKIN_SCHEMA_VERSION_SETTING_KEY, JSON.stringify(CHECKIN_SCHEMA_VERSION));
+function readSchemaVersion(db: Database.Database): number {
+  return Number(db.pragma('user_version', { simple: true }));
+}
+
+function validateSchemaVersion(db: Database.Database): void {
+  const version = readSchemaVersion(db);
+  // Zero is the SQLite default for a new database and for an older full
+  // MetAPI database being adopted by the standalone tools. Any other version
+  // requires explicit schema evolution rather than a silent overwrite.
+  if (version !== 0 && version !== CHECKIN_SCHEMA_VERSION) {
+    throw new Error('Unsupported check-in schema version: expected 0 or ' + CHECKIN_SCHEMA_VERSION + ', got ' + version);
+  }
+}
+
+function writeSchemaVersion(db: Database.Database): void {
+  validateSchemaVersion(db);
+  if (readSchemaVersion(db) !== CHECKIN_SCHEMA_VERSION) {
+    db.pragma('user_version = ' + CHECKIN_SCHEMA_VERSION);
+  }
 }
 
 export function ensureCheckinDatabaseSchema(
@@ -159,6 +195,7 @@ export function ensureCheckinDatabaseSchema(
   const createdTables: string[] = [];
   let createdIndexes = 0;
   const droppedTables: string[] = [];
+  const deletedSettingsKeys: string[] = [];
 
   db.pragma('foreign_keys = ON');
   integrityCheck(db);
@@ -166,10 +203,10 @@ export function ensureCheckinDatabaseSchema(
   const missingTables = CHECKIN_RETAINED_TABLES.filter((table) => !tableExists(db, table));
   const presentTables = CHECKIN_RETAINED_TABLES.filter((table) => tableExists(db, table));
   validateSchemaShape(db, presentTables);
-  if (!options.readonly && options.prune && presentTables.includes('settings')) upsertSchemaVersion(db);
+  validateSchemaVersion(db);
 
   const presentRetainedBefore = CHECKIN_RETAINED_TABLES.filter((table) => tableExists(db, table));
-  const beforeSnapshots = tableSnapshots(db, presentRetainedBefore);
+  const beforeSnapshots = protectedSnapshots(db, presentRetainedBefore);
 
   if (options.prune) {
     const missingRetained = CHECKIN_RETAINED_TABLES.filter((table) => !tableExists(db, table));
@@ -191,15 +228,22 @@ export function ensureCheckinDatabaseSchema(
     }
 
     const droppable = CHECKIN_RETIRED_TABLES.filter((table) => tables.has(table));
+    const deletedKeyPlaceholders = CHECKIN_SETTINGS_KEYS.map(() => '?').join(', ');
+    const removableSettingsKeys = (
+      db.prepare('SELECT "key" FROM settings WHERE "key" NOT IN (' + deletedKeyPlaceholders + ') ORDER BY "key"').all(...CHECKIN_SETTINGS_KEYS) as Array<{ key: string }>
+    ).map((row) => row.key);
     const transaction = db.transaction(() => {
       for (const table of droppable) {
         db.prepare('DROP TABLE IF EXISTS ' + quoteIdentifier(table)).run();
         droppedTables.push(table);
       }
+      for (const key of removableSettingsKeys) {
+        db.prepare('DELETE FROM settings WHERE "key" = ?').run(key);
+        deletedSettingsKeys.push(key);
+      }
     });
     transaction();
     integrityCheck(db);
-    assertUnchangedSnapshots(beforeSnapshots, tableSnapshots(db, CHECKIN_RETAINED_TABLES), 'Prune');
   }
 
   for (const table of missingTables) {
@@ -221,10 +265,19 @@ export function ensureCheckinDatabaseSchema(
 
   validateSchemaShape(db, CHECKIN_RETAINED_TABLES);
 
-  if (!options.readonly) upsertSchemaVersion(db);
+  if (options.readonly) {
+    validateSchemaVersion(db);
+  } else {
+    writeSchemaVersion(db);
+  }
 
   integrityCheck(db);
   validateSchemaShape(db, CHECKIN_RETAINED_TABLES);
+  assertUnchangedSnapshots(
+    beforeSnapshots,
+    protectedSnapshots(db, CHECKIN_RETAINED_TABLES),
+    options.prune ? 'Prune' : 'Bootstrap',
+  );
   const tables = userTables(db);
   const retainedSet = new Set<string>(CHECKIN_RETAINED_TABLES);
   const extraTables = tables.filter((table) => !retainedSet.has(table));
@@ -236,6 +289,7 @@ export function ensureCheckinDatabaseSchema(
     createdTables,
     createdIndexes,
     droppedTables,
+    deletedSettingsKeys,
     retainedTables: CHECKIN_RETAINED_TABLES.filter((table) => tables.includes(table)),
     extraTables,
     schemaVersion: CHECKIN_SCHEMA_VERSION,

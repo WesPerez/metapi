@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { ensureCheckinDatabaseSchema } from '../../src/server/checkinDatabaseBootstrap.js';
-import { CHECKIN_RETAINED_TABLES, CHECKIN_RETIRED_TABLES } from '../../src/server/db/checkinSchema.js';
+import { CHECKIN_RETAINED_TABLES, CHECKIN_RETIRED_TABLES, CHECKIN_SETTINGS_KEYS } from '../../src/server/db/checkinSchema.js';
 
 type Options = {
   dbPath: string;
@@ -67,15 +67,14 @@ async function main(): Promise<void> {
     ensureCheckinDatabaseSchema(db, { readonly: true });
     if (options.apply) backupPath = await createBackup(db, options);
 
-    const result = options.apply
-      ? ensureCheckinDatabaseSchema(db, { prune: true })
-      : { droppedTables: [] as string[] };
+    const result = options.apply ? ensureCheckinDatabaseSchema(db, { prune: true }) : undefined;
     if (options.apply && options.vacuum) {
       db.exec('VACUUM');
       db.pragma('wal_checkpoint(TRUNCATE)');
     }
 
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);
+    const settingsKeys = (db.prepare('SELECT "key" FROM settings ORDER BY "key"').all() as Array<{ key: string }>).map((row) => row.key);
     const counts = Object.fromEntries(CHECKIN_RETAINED_TABLES.map((table) => [
       table,
       Number((db.prepare('SELECT count(*) AS count FROM ' + JSON.stringify(table)).get() as { count: number }).count),
@@ -83,10 +82,13 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({
       status: options.apply ? 'pruned' : 'validated',
       db: realpathSync(options.dbPath),
-      droppedTables: result.droppedTables,
+      droppedTables: result?.droppedTables ?? [],
+      deletedSettingsKeys: result?.deletedSettingsKeys ?? [],
+      retiredSettingsKeysRemaining: settingsKeys.filter((key) => !CHECKIN_SETTINGS_KEYS.includes(key as never)),
       retiredTablesRemaining: CHECKIN_RETIRED_TABLES.filter((table) => tables.includes(table)),
       tables,
       counts,
+      schemaVersion: Number(db.pragma('user_version', { simple: true })),
       backup: backupPath,
       vacuum: options.apply && options.vacuum,
       integrity: 'ok',

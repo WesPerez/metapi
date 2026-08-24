@@ -7,6 +7,7 @@ services:
         VITE_CHECKIN_MODE: "true"
     image: metapi-checkin:local
     container_name: metapi-checkin
+    command: ["node", "dist/server/index.js"]
     ports:
       - "127.0.0.1:${CHECKIN_PORT:-14000}:4000"
     extra_hosts:

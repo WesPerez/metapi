@@ -27,7 +27,6 @@ import {
   clearFocusParams,
   readFocusAccountIntent,
 } from "./helpers/navigationFocus.js";
-import { TokensPanel } from "./Tokens.js";
 import { tr } from "../i18n.js";
 import {
   buildCustomReorderUpdates,
@@ -37,15 +36,14 @@ import {
 import { shouldIgnoreRowSelectionClick } from "./helpers/rowSelection.js";
 import { SITE_DOCS_URL } from "../docsLink.js";
 import { getSiteInitializationPreset } from "../../shared/siteInitializationPresets.js";
-import { parseBatchApiKeys } from "../../shared/apiKeyBatch.js";
 
 const CHECKIN_MODE = Boolean(
   import.meta.env.VITE_CHECKIN_MODE === "true" ||
-    import.meta.env.VITE_CHECKIN_MODE === "1" ||
-    import.meta.env.VITE_APP_MODE === "checkin",
+  import.meta.env.VITE_CHECKIN_MODE === "1" ||
+  import.meta.env.VITE_APP_MODE === "checkin",
 );
 
-type ConnectionsSegment = "session" | "apikey" | "tokens";
+type ConnectionsSegment = "session";
 
 const CONNECTION_PAGE_SIZE_OPTIONS = [15, 30, 50] as const;
 
@@ -62,20 +60,6 @@ const ACCOUNT_SEGMENTS: Array<{
     tooltip: "用于签到、余额、状态维护",
     tooltipSide: "bottom",
     tooltipAlign: "start",
-  },
-  {
-    value: "apikey",
-    label: "API Key管理",
-    tooltip: "只有 Base URL + Key 时使用，只负责代理调用",
-    tooltipSide: "bottom",
-    tooltipAlign: "center",
-  },
-  {
-    value: "tokens",
-    label: "账号令牌管理",
-    tooltip: "从账号同步或手动维护，供路由实际调用",
-    tooltipSide: "bottom",
-    tooltipAlign: "end",
   },
 ];
 
@@ -115,9 +99,7 @@ function createRebindForm(platformUserId = "") {
 }
 
 function resolveConnectionsSegment(search: string): ConnectionsSegment {
-  if (CHECKIN_MODE) return "session";
-  const rawSegment = new URLSearchParams(search).get("segment");
-  if (rawSegment === "apikey" || rawSegment === "tokens") return rawSegment;
+  void search;
   return "session";
 }
 
@@ -129,21 +111,10 @@ function isAccountDisplayDisabled(account: any): boolean {
   );
 }
 
-function buildAccountSiteGroupKey(account: any): string {
-  const siteId = Number(account?.site?.id ?? account?.siteId);
-  if (Number.isFinite(siteId) && siteId > 0) return `id:${Math.trunc(siteId)}`;
-  const siteName = String(account?.site?.name || "").trim().toLowerCase();
-  const siteUrl = String(account?.site?.url || "").trim().toLowerCase();
-  return `fallback:${siteName}:${siteUrl}`;
-}
-
 export default function Accounts() {
   const location = useLocation();
   const navigate = useNavigate();
-  const activeSegment = useMemo(
-    () => resolveConnectionsSegment(location.search),
-    [location.search],
-  );
+  resolveConnectionsSegment(location.search);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -170,8 +141,6 @@ export default function Accounts() {
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>(
     {},
   );
-  const [embeddedTokenActions, setEmbeddedTokenActions] =
-    useState<React.ReactNode>(null);
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<null | {
@@ -227,9 +196,6 @@ export default function Accounts() {
   });
   const [connectionPage, setConnectionPage] = useState(1);
   const [connectionPageSize, setConnectionPageSize] = useState<number>(15);
-  const [apiKeyEnabledModelFilter, setApiKeyEnabledModelFilter] = useState<string>("");
-  const [apiKeySiteFilter, setApiKeySiteFilter] = useState<string>("");
-  const [apiKeyShowDisabled, setApiKeyShowDisabled] = useState<boolean>(false);
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRebindTargetRef = useRef<any | null>(null);
@@ -270,15 +236,6 @@ export default function Accounts() {
     () => sites.find((item) => item.id === tokenForm.siteId) || null,
     [sites, tokenForm.siteId],
   );
-  const parsedApiKeys = useMemo(
-    () =>
-      activeSegment === "apikey"
-        ? parseBatchApiKeys(tokenForm.accessToken)
-        : [],
-    [activeSegment, tokenForm.accessToken],
-  );
-  const isBatchApiKeyInput =
-    activeSegment === "apikey" && parsedApiKeys.length > 1;
   const siteSelectOptions = useMemo(
     () => [
       { value: "0", label: "选择站点" },
@@ -292,8 +249,7 @@ export default function Accounts() {
   );
   const isSub2ApiSelected =
     (selectedTokenSite?.platform || "").toLowerCase() === "sub2api";
-  const activeAddCredentialMode =
-    activeSegment === "apikey" ? "apikey" : "session";
+  const activeAddCredentialMode = "session";
   const createIntentPreset = useMemo(
     () => getSiteInitializationPreset(createIntentPresetId),
     [createIntentPresetId],
@@ -337,97 +293,10 @@ export default function Accounts() {
     [accounts, sortMode],
   );
   const visibleAccounts = useMemo(() => {
-    if (activeSegment === "tokens") return [];
-    const filtered = sortedAccounts.filter(
-      (account) => resolveAccountCredentialMode(account) === activeSegment,
+    return sortedAccounts.filter(
+      (account) => resolveAccountCredentialMode(account) === "session",
     );
-    if (activeSegment !== "apikey") return filtered;
-
-    const statusFiltered = apiKeyShowDisabled
-      ? filtered
-      : filtered.filter((account) => {
-          const accountDisabled = account?.status === "disabled";
-          const siteDisabled = account?.site?.status === "disabled";
-          return !accountDisabled && !siteDisabled;
-        });
-
-    const trimmedFilter = apiKeyEnabledModelFilter.trim();
-    const modelFiltered = trimmedFilter
-      ? statusFiltered.filter((account) => {
-          const models = Array.isArray(account?.enabledModels)
-            ? account.enabledModels
-            : [];
-          return models.some(
-            (model: unknown) => String(model || "") === trimmedFilter,
-          );
-        })
-      : statusFiltered;
-    const trimmedSiteFilter = apiKeySiteFilter.trim();
-    const siteFilteredAccounts = trimmedSiteFilter
-      ? modelFiltered.filter((account) => {
-          const siteId = Number(account?.site?.id ?? account?.siteId);
-          return Number.isFinite(siteId) && String(siteId) === trimmedSiteFilter;
-        })
-      : modelFiltered;
-
-    const sortedIndexById = new Map<number, number>();
-    const siteOrder = new Map<string, number>();
-    siteFilteredAccounts.forEach((account, index) => {
-      sortedIndexById.set(account.id, index);
-      const siteKey = buildAccountSiteGroupKey(account);
-      if (!siteOrder.has(siteKey)) siteOrder.set(siteKey, siteOrder.size);
-    });
-
-    return [...siteFilteredAccounts].sort((left, right) => {
-      const leftSiteOrder = siteOrder.get(buildAccountSiteGroupKey(left)) ?? 0;
-      const rightSiteOrder = siteOrder.get(buildAccountSiteGroupKey(right)) ?? 0;
-      if (leftSiteOrder !== rightSiteOrder) return leftSiteOrder - rightSiteOrder;
-      return (sortedIndexById.get(left.id) ?? 0) - (sortedIndexById.get(right.id) ?? 0);
-    });
-  }, [
-    activeSegment,
-    sortedAccounts,
-    apiKeyEnabledModelFilter,
-    apiKeySiteFilter,
-    apiKeyShowDisabled,
-  ]);
-  const apiKeyEnabledModelOptions = useMemo(() => {
-    if (activeSegment !== "apikey") return [] as string[];
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const account of sortedAccounts) {
-      if (resolveAccountCredentialMode(account) !== "apikey") continue;
-      const models = Array.isArray(account?.enabledModels)
-        ? account.enabledModels
-        : [];
-      for (const raw of models) {
-        const value = String(raw || "").trim();
-        if (!value || seen.has(value)) continue;
-        seen.add(value);
-        result.push(value);
-      }
-    }
-    result.sort((a, b) => a.localeCompare(b));
-    return result;
-  }, [activeSegment, sortedAccounts]);
-  const apiKeySiteOptions = useMemo(() => {
-    if (activeSegment !== "apikey") return [] as Array<{ id: number; name: string }>;
-    const seen = new Map<number, string>();
-    for (const account of sortedAccounts) {
-      if (resolveAccountCredentialMode(account) !== "apikey") continue;
-      const id = Number(account?.site?.id ?? account?.siteId);
-      if (!Number.isFinite(id) || id <= 0) continue;
-      if (seen.has(id)) continue;
-      const name =
-        String(account?.site?.name || "").trim() ||
-        String(account?.site?.url || "").trim() ||
-        `站点 #${id}`;
-      seen.set(id, name);
-    }
-    return Array.from(seen.entries())
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [activeSegment, sortedAccounts]);
+  }, [sortedAccounts]);
   const connectionTotalPages = Math.max(
     1,
     Math.ceil(visibleAccounts.length / connectionPageSize),
@@ -442,27 +311,13 @@ export default function Accounts() {
   }, [connectionPageSize, effectiveConnectionPage, visibleAccounts]);
   const allDisplayedAccountsSelected =
     displayedAccounts.length > 0 &&
-    displayedAccounts.every((account) => selectedAccountIds.includes(account.id));
+    displayedAccounts.every((account) =>
+      selectedAccountIds.includes(account.id),
+    );
   const verifyFailureHint = buildVerifyFailureHint(verifyResult);
   const addAccountPrereqHint = buildAddAccountPrereqHint(verifyResult);
 
-  const setSegment = (nextSegment: ConnectionsSegment) => {
-    if (CHECKIN_MODE && nextSegment !== "session") return;
-    const params = new URLSearchParams(location.search);
-    if (nextSegment === "session") params.delete("segment");
-    else params.set("segment", nextSegment);
-    const nextSearch = params.toString();
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : "",
-      },
-      { replace: false },
-    );
-  };
-
   useEffect(() => {
-    if (!CHECKIN_MODE) return;
     const params = new URLSearchParams(location.search);
     if (!params.has("segment")) return;
     params.delete("segment");
@@ -477,39 +332,18 @@ export default function Accounts() {
   }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
-    if (activeSegment !== "tokens") return;
-    closeAddPanel();
-    if (rebindTarget) closeRebindPanel();
-    setEditingAccount(null);
-  }, [activeSegment]);
-
-  useEffect(() => {
-    setConnectionPage(1);
-    if (activeSegment === "apikey") return;
-    if (apiKeyEnabledModelFilter) setApiKeyEnabledModelFilter("");
-    if (apiKeySiteFilter) setApiKeySiteFilter("");
-    if (apiKeyShowDisabled) setApiKeyShowDisabled(false);
-  }, [activeSegment]);
-
-  useEffect(() => {
     setConnectionPage((current) =>
       Math.min(Math.max(current, 1), connectionTotalPages),
     );
   }, [connectionTotalPages]);
 
   useEffect(() => {
-    if (activeSegment === "tokens") return;
-    setEmbeddedTokenActions(null);
-  }, [activeSegment]);
-
-  useEffect(() => {
-    if (activeSegment === "tokens" || !loaded) return;
+    if (!loaded) return;
     const params = new URLSearchParams(location.search);
     const shouldOpenCreate = isTruthyFlag(params.get("create"));
     const requestedSiteId = parsePositiveInt(params.get("siteId"));
     if (!shouldOpenCreate || !requestedSiteId) return;
 
-    const credentialMode = activeSegment === "apikey" ? "apikey" : "session";
     const initializationPreset = getSiteInitializationPreset(
       params.get("initPreset"),
     );
@@ -521,13 +355,7 @@ export default function Accounts() {
       Boolean(initializationPreset?.recommendedModels?.length),
     );
     setLoginForm(createLoginForm());
-    setTokenForm({
-      ...createTokenForm(credentialMode),
-      siteId: requestedSiteId,
-      skipModelFetch:
-        credentialMode === "apikey" &&
-        initializationPreset?.recommendedSkipModelFetch === true,
-    });
+    setTokenForm({ ...createTokenForm("session"), siteId: requestedSiteId });
 
     params.delete("create");
     params.delete("siteId");
@@ -541,7 +369,7 @@ export default function Accounts() {
       },
       { replace: true },
     );
-  }, [activeSegment, loaded, location.pathname, location.search, navigate]);
+  }, [loaded, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     return () => {
@@ -556,7 +384,8 @@ export default function Accounts() {
       (!loginForm.siteId && !loginForm.siteUrl.trim()) ||
       !loginForm.username ||
       !loginForm.password
-    ) return;
+    )
+      return;
     setSaving(true);
     try {
       const result = await api.loginAccount({
@@ -586,13 +415,6 @@ export default function Accounts() {
 
   const handleVerifyToken = async () => {
     if (!tokenForm.siteId || !tokenForm.accessToken) return;
-    if (isBatchApiKeyInput) {
-      toast.info(
-        `检测到 ${parsedApiKeys.length} 个 API Key，批量模式会在添加时逐条校验`,
-      );
-      return;
-    }
-    const credentialMode = activeSegment === "apikey" ? "apikey" : "session";
     setVerifying(true);
     setVerifyResult(null);
     try {
@@ -602,19 +424,13 @@ export default function Accounts() {
         platformUserId: tokenForm.platformUserId
           ? parseInt(tokenForm.platformUserId)
           : undefined,
-        credentialMode,
+        credentialMode: "session",
       });
       setVerifyResult(result);
       if (result.success) {
-        if (result.tokenType === "apikey") {
-          toast.success(
-            `API Key 验证成功（可用模型 ${result.modelCount || 0} 个）`,
-          );
-        } else {
-          toast.success(
-            `Session 验证成功: ${result.userInfo?.username || "未知用户"}`,
-          );
-        }
+        toast.success(
+          `Session 验证成功: ${result.userInfo?.username || "未知用户"}`,
+        );
       } else {
         toast.error(
           normalizeVerifyFailureMessage(result.message || "Token 无效"),
@@ -630,15 +446,10 @@ export default function Accounts() {
 
   const handleTokenAdd = async () => {
     if (!tokenForm.siteId || !tokenForm.accessToken) return;
-    if (
-      !isBatchApiKeyInput &&
-      !verifyResult?.success &&
-      !tokenForm.skipModelFetch
-    ) {
+    if (!verifyResult?.success && !tokenForm.skipModelFetch) {
       toast.error("请先验证 Token 成功后再添加账号");
       return;
     }
-    const credentialMode = activeSegment === "apikey" ? "apikey" : "session";
     const initializationPreset = createIntentPreset;
     setSaving(true);
     try {
@@ -646,7 +457,6 @@ export default function Accounts() {
         siteId: tokenForm.siteId,
         username: tokenForm.username.trim() || undefined,
         accessToken: tokenForm.accessToken,
-        accessTokens: isBatchApiKeyInput ? parsedApiKeys : undefined,
         platformUserId: tokenForm.platformUserId
           ? parseInt(tokenForm.platformUserId)
           : undefined,
@@ -658,33 +468,13 @@ export default function Accounts() {
           isSub2ApiSelected && tokenForm.tokenExpiresAt.trim()
             ? Number.parseInt(tokenForm.tokenExpiresAt.trim(), 10)
             : undefined,
-        credentialMode,
+        credentialMode: "session",
         skipModelFetch: tokenForm.skipModelFetch,
       });
-      if (result?.batch) {
-        closeAddPanel();
-        const createdCount = Number(result.createdCount) || 0;
-        const failedCount = Number(result.failedCount) || 0;
-        if (createdCount > 0) {
-          toast.success(
-            `批量添加完成：成功 ${createdCount}，失败 ${failedCount}`,
-          );
-        }
-        const failedItems = Array.isArray(result.items)
-          ? result.items.filter((item: any) => item?.status === "failed")
-          : [];
-        if (failedItems.length > 0) {
-          const firstMessage = failedItems[0]?.message || "创建失败";
-          toast.error(`失败 ${failedItems.length} 条：${firstMessage}`);
-        }
-        load(true);
-        return;
-      }
       let seededRecommendedModels = false;
       const recommendedModels = initializationPreset?.recommendedModels || [];
       const createdAccountId = Number(result?.id) || 0;
       const shouldSeedRecommendedModels =
-        credentialMode === "apikey" &&
         tokenForm.skipModelFetch &&
         applyCreatePresetModels &&
         recommendedModels.length > 0 &&
@@ -703,8 +493,6 @@ export default function Accounts() {
       closeAddPanel();
       if (result.queued) {
         toast.info(result.message || "账号已添加，后台正在同步初始化信息。");
-      } else if (result.tokenType === "apikey") {
-        toast.success("已添加为 API Key 账号（可用于代理转发）");
       } else {
         const parts: string[] = [];
         if (result.usernameDetected) parts.push("用户名已自动识别");
@@ -713,9 +501,7 @@ export default function Accounts() {
         toast.success(`账号已添加${extra}`);
       }
       if (seededRecommendedModels) {
-        toast.success(
-          `已补入 ${recommendedModels.length} 个推荐模型并重建路由`,
-        );
+        toast.success(`已补入 ${recommendedModels.length} 个推荐模型`);
       }
       load(true);
     } catch (e: any) {
@@ -879,12 +665,7 @@ export default function Accounts() {
         siteId,
         Array.from(modelModal.pendingDisabled),
       );
-      try {
-        await api.rebuildRoutes(false, false);
-        toast.success("模型禁用设置已保存，路由已重建");
-      } catch {
-        toast.error("模型禁用设置已保存，但路由重建失败，请手动刷新路由");
-      }
+      toast.success("模型禁用设置已保存");
       void load(true);
       closeModelModal();
     } catch (e: any) {
@@ -1233,7 +1014,10 @@ export default function Accounts() {
     }
     setSelectedAccountIds((current) =>
       Array.from(
-        new Set([...current, ...displayedAccounts.map((account) => account.id)]),
+        new Set([
+          ...current,
+          ...displayedAccounts.map((account) => account.id),
+        ]),
       ),
     );
   };
@@ -1375,12 +1159,9 @@ export default function Accounts() {
 
   const handleSubmitRebind = async () => {
     if (!rebindTarget || !rebindForm.accessToken.trim()) return;
-    if (
-      !(
-        rebindVerifyResult?.success &&
-        rebindVerifyResult?.tokenType === "session"
-      )
-    ) {
+    if (!(
+      rebindVerifyResult?.success && rebindVerifyResult?.tokenType === "session"
+    )) {
       toast.error("请先验证新的 Session Token 成功");
       return;
     }
@@ -1414,10 +1195,12 @@ export default function Accounts() {
 
   useEffect(() => {
     const { accountId, openRebind } = readFocusAccountIntent(location.search);
-    if (!accountId || !loaded || activeSegment === "tokens") return;
+    if (!accountId || !loaded) return;
 
     const target = visibleAccounts.find((account) => account.id === accountId);
-    const targetIndex = visibleAccounts.findIndex((account) => account.id === accountId);
+    const targetIndex = visibleAccounts.findIndex(
+      (account) => account.id === accountId,
+    );
     const row = rowRefs.current.get(accountId);
     const cleanedSearch = clearFocusParams(location.search);
     if (!target) {
@@ -1469,7 +1252,6 @@ export default function Accounts() {
       { replace: true },
     );
   }, [
-    activeSegment,
     connectionPageSize,
     effectiveConnectionPage,
     loaded,
@@ -1482,16 +1264,8 @@ export default function Accounts() {
   ]);
 
   const canAddVerifiedConnection = Boolean(
-    verifyResult?.success &&
-    ((activeSegment === "apikey" && verifyResult.tokenType === "apikey") ||
-      (activeSegment === "session" && verifyResult.tokenType === "session")),
+    verifyResult?.success && verifyResult.tokenType === "session",
   );
-  const canSubmitApiKeyConnection =
-    activeSegment === "apikey"
-      ? isBatchApiKeyInput ||
-        canAddVerifiedConnection ||
-        !!tokenForm.skipModelFetch
-      : canAddVerifiedConnection;
   const connectionPagination =
     visibleAccounts.length > 0 ? (
       <div
@@ -1511,10 +1285,17 @@ export default function Accounts() {
           {Math.min(
             effectiveConnectionPage * connectionPageSize,
             visibleAccounts.length,
-          )} 条，共{" "}
-          {visibleAccounts.length} 条
+          )}{" "}
+          条，共 {visibleAccounts.length} 条
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           <button
             type="button"
             onClick={() => setConnectionPage(1)}
@@ -1526,16 +1307,20 @@ export default function Accounts() {
           </button>
           <button
             type="button"
-            onClick={() =>
-              setConnectionPage((page) => Math.max(1, page - 1))
-            }
+            onClick={() => setConnectionPage((page) => Math.max(1, page - 1))}
             disabled={effectiveConnectionPage === 1}
             className="btn btn-ghost"
             style={{ padding: "6px 12px", fontSize: 13 }}
           >
             上一页
           </button>
-          <span style={{ fontSize: 13, color: "var(--color-text-primary)", fontWeight: 600 }}>
+          <span
+            style={{
+              fontSize: 13,
+              color: "var(--color-text-primary)",
+              fontWeight: 600,
+            }}
+          >
             {effectiveConnectionPage} / {connectionTotalPages}
           </span>
           <button
@@ -1588,33 +1373,33 @@ export default function Accounts() {
     <div className="animate-fade-in">
       <div className="page-header">
         <h2 className="page-title">{tr("连接管理")}</h2>
-        {activeSegment !== "tokens" && (
-          <div className="page-actions accounts-page-actions">
-            {isMobile ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setShowMobileTools(true)}
-                  className="btn btn-ghost"
-                  style={{ border: "1px solid var(--color-border)" }}
-                >
-                  排序与操作
-                </button>
-                <button
-                  type="button"
-                  data-testid="accounts-mobile-select-all"
-                  onClick={() =>
-                    toggleSelectAllVisibleAccounts(!allDisplayedAccountsSelected)
-                  }
-                  className="btn btn-ghost"
-                  style={{ border: "1px solid var(--color-border)" }}
-                >
-                  {allDisplayedAccountsSelected ? "取消全选" : "全选本页"}
-                </button>
-              </>
-            ) : (
-              <>
-                {!CHECKIN_MODE && <div
+        <div className="page-actions accounts-page-actions">
+          {isMobile ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowMobileTools(true)}
+                className="btn btn-ghost"
+                style={{ border: "1px solid var(--color-border)" }}
+              >
+                排序与操作
+              </button>
+              <button
+                type="button"
+                data-testid="accounts-mobile-select-all"
+                onClick={() =>
+                  toggleSelectAllVisibleAccounts(!allDisplayedAccountsSelected)
+                }
+                className="btn btn-ghost"
+                style={{ border: "1px solid var(--color-border)" }}
+              >
+                {allDisplayedAccountsSelected ? "取消全选" : "全选本页"}
+              </button>
+            </>
+          ) : (
+            <>
+              {!CHECKIN_MODE && (
+                <div
                   className="accounts-sort-select"
                   style={{ minWidth: 156, position: "relative", zIndex: 20 }}
                 >
@@ -1629,64 +1414,61 @@ export default function Accounts() {
                     ]}
                     placeholder="自定义排序"
                   />
-                </div>}
-                {activeSegment === "session" && (
-                  <button
-                    onClick={() =>
-                      withLoading(
-                        "checkin-all",
-                        () => api.triggerCheckinAll(),
-                        "已触发全部签到",
-                      )
-                    }
-                    disabled={actionLoading["checkin-all"]}
-                    className="btn btn-soft-primary"
-                  >
-                    {actionLoading["checkin-all"] ? (
-                      <>
-                        <span className="spinner spinner-sm" />
-                        {tr("签到中...")}
-                      </>
-                    ) : (
-                      tr("全部签到")
-                    )}
-                  </button>
-                )}
-                <button
-                  onClick={handleRefreshRuntimeHealth}
-                  disabled={actionLoading["health-refresh"]}
-                  className="btn btn-soft-primary"
-                >
-                  {actionLoading["health-refresh"] ? (
-                    <>
-                      <span className="spinner spinner-sm" />
-                      {tr("刷新状态中...")}
-                    </>
-                  ) : (
-                    tr("刷新账户状态")
-                  )}
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => {
-                const nextOpen = !showAdd;
-                if (!nextOpen) {
-                  closeAddPanel();
-                  return;
+                </div>
+              )}
+              <button
+                onClick={() =>
+                  withLoading(
+                    "checkin-all",
+                    () => api.triggerCheckinAll(),
+                    "已触发全部签到",
+                  )
                 }
-                setEditingAccount(null);
-                closeRebindPanel();
-                setShowAdd(true);
-                resetAddForms(activeAddCredentialMode);
-              }}
-              className="btn btn-primary"
-            >
-              {showAdd ? tr("取消") : tr("+ 添加连接")}
-            </button>
-          </div>
-        )}
-        {activeSegment === "tokens" && embeddedTokenActions}
+                disabled={actionLoading["checkin-all"]}
+                className="btn btn-soft-primary"
+              >
+                {actionLoading["checkin-all"] ? (
+                  <>
+                    <span className="spinner spinner-sm" />
+                    {tr("签到中...")}
+                  </>
+                ) : (
+                  tr("全部签到")
+                )}
+              </button>
+              <button
+                onClick={handleRefreshRuntimeHealth}
+                disabled={actionLoading["health-refresh"]}
+                className="btn btn-soft-primary"
+              >
+                {actionLoading["health-refresh"] ? (
+                  <>
+                    <span className="spinner spinner-sm" />
+                    {tr("刷新状态中...")}
+                  </>
+                ) : (
+                  tr("刷新账户状态")
+                )}
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => {
+              const nextOpen = !showAdd;
+              if (!nextOpen) {
+                closeAddPanel();
+                return;
+              }
+              setEditingAccount(null);
+              closeRebindPanel();
+              setShowAdd(true);
+              resetAddForms(activeAddCredentialMode);
+            }}
+            className="btn btn-primary"
+          >
+            {showAdd ? tr("取消") : tr("+ 添加连接")}
+          </button>
+        </div>
       </div>
 
       <ResponsiveFilterPanel
@@ -1711,30 +1493,28 @@ export default function Accounts() {
                 placeholder="自定义排序"
               />
             </div>
-            {activeSegment === "session" && (
-              <button
-                onClick={async () => {
-                  setShowMobileTools(false);
-                  await withLoading(
-                    "checkin-all",
-                    () => api.triggerCheckinAll(),
-                    "已触发全部签到",
-                  );
-                }}
-                disabled={actionLoading["checkin-all"]}
-                className="btn btn-ghost"
-                style={{ border: "1px solid var(--color-border)" }}
-              >
-                {actionLoading["checkin-all"] ? (
-                  <>
-                    <span className="spinner spinner-sm" />
-                    {tr("签到中...")}
-                  </>
-                ) : (
-                  tr("全部签到")
-                )}
-              </button>
-            )}
+            <button
+              onClick={async () => {
+                setShowMobileTools(false);
+                await withLoading(
+                  "checkin-all",
+                  () => api.triggerCheckinAll(),
+                  "已触发全部签到",
+                );
+              }}
+              disabled={actionLoading["checkin-all"]}
+              className="btn btn-ghost"
+              style={{ border: "1px solid var(--color-border)" }}
+            >
+              {actionLoading["checkin-all"] ? (
+                <>
+                  <span className="spinner spinner-sm" />
+                  {tr("签到中...")}
+                </>
+              ) : (
+                tr("全部签到")
+              )}
+            </button>
             <button
               onClick={async () => {
                 setShowMobileTools(false);
@@ -1776,215 +1556,29 @@ export default function Accounts() {
             borderRadius: "var(--radius-md)",
           }}
         >
-          {(CHECKIN_MODE ? ACCOUNT_SEGMENTS.slice(0, 1) : ACCOUNT_SEGMENTS).map((segment) => (
-          <button
-            key={segment.value}
-            type="button"
-            onClick={() => setSegment(segment.value)}
-            data-tooltip={segment.tooltip}
-            data-tooltip-side={segment.tooltipSide}
-            data-tooltip-align={segment.tooltipAlign}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "none",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              background:
-                activeSegment === segment.value
-                  ? "var(--color-bg)"
-                  : "transparent",
-              color:
-                activeSegment === segment.value
-                  ? "var(--color-primary)"
-                  : "var(--color-text-secondary)",
-              boxShadow:
-                activeSegment === segment.value ? "var(--shadow-sm)" : "none",
-              transition: "all 0.2s ease",
-            }}
-          >
-            {segment.label}
-          </button>
+          {ACCOUNT_SEGMENTS.map((segment) => (
+            <button
+              key={segment.value}
+              type="button"
+              data-tooltip={segment.tooltip}
+              data-tooltip-side={segment.tooltipSide}
+              data-tooltip-align={segment.tooltipAlign}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "none",
+                cursor: "default",
+                fontSize: 13,
+                fontWeight: 600,
+                background: "var(--color-bg)",
+                color: "var(--color-primary)",
+                boxShadow: "var(--shadow-sm)",
+              }}
+            >
+              {segment.label}
+            </button>
           ))}
         </div>
-        {activeSegment === "apikey" && (
-          <>
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                minWidth: 240,
-              }}
-              data-testid="apikey-enabled-model-filter"
-            >
-              <span
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-secondary)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                启用模型
-              </span>
-              <div style={{ minWidth: 200 }}>
-                <ModernSelect
-                  size="sm"
-                  value={apiKeyEnabledModelFilter}
-                  onChange={(next) => {
-                    setApiKeyEnabledModelFilter(next);
-                    setConnectionPage(1);
-                  }}
-                  options={[
-                    { value: "", label: "全部启用模型" },
-                    ...apiKeyEnabledModelOptions.map((model) => ({
-                      value: model,
-                      label: model,
-                    })),
-                  ]}
-                  placeholder="全部启用模型"
-                  emptyLabel="暂无可筛选模型"
-                  searchable
-                  searchPlaceholder="输入模型名筛选..."
-                />
-              </div>
-            </div>
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                minWidth: 240,
-              }}
-              data-testid="apikey-site-filter"
-            >
-              <span
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-secondary)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                节点
-              </span>
-              <div style={{ minWidth: 200 }}>
-                <ModernSelect
-                  size="sm"
-                  value={apiKeySiteFilter}
-                  onChange={(next) => {
-                    setApiKeySiteFilter(next);
-                    setConnectionPage(1);
-                  }}
-                  options={[
-                    { value: "", label: "全部节点" },
-                    ...apiKeySiteOptions.map((site) => ({
-                      value: String(site.id),
-                      label: site.name,
-                    })),
-                  ]}
-                  placeholder="全部节点"
-                  emptyLabel="暂无可筛选节点"
-                  searchable
-                  searchPlaceholder="输入节点名筛选..."
-                />
-              </div>
-            </div>
-            <label
-              data-testid="apikey-show-disabled-toggle"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 12,
-                color: "var(--color-text-secondary)",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-              data-tooltip="关闭时仅显示账号与站点都启用的连接"
-            >
-              <input
-                type="checkbox"
-                checked={apiKeyShowDisabled}
-                onChange={(e) => {
-                  setApiKeyShowDisabled(e.target.checked);
-                  setConnectionPage(1);
-                }}
-              />
-              显示已禁用
-            </label>
-            <div style={{ display: "inline-flex", gap: 6 }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                style={{ border: "1px solid var(--color-border)", padding: "6px 10px", fontSize: 12 }}
-                disabled={batchActionLoading || visibleAccounts.length === 0}
-                onClick={async () => {
-                  const ids = visibleAccounts
-                    .filter((a: any) => a?.status === "disabled")
-                    .map((a: any) => Number(a.id))
-                    .filter((id: number) => Number.isFinite(id) && id > 0);
-                  if (ids.length === 0) {
-                    toast.info("当前筛选结果中没有可启用的连接");
-                    return;
-                  }
-                  setBatchActionLoading(true);
-                  try {
-                    const result = await api.batchUpdateAccounts({ ids, action: "enable" });
-                    const ok = Array.isArray(result?.successIds) ? result.successIds.length : 0;
-                    const fail = Array.isArray(result?.failedItems) ? result.failedItems.length : 0;
-                    toast[fail > 0 ? "info" : "success"](
-                      fail > 0
-                        ? `全部启用完成：成功 ${ok}，失败 ${fail}`
-                        : `已启用 ${ok} 个连接`,
-                    );
-                    load(true);
-                  } catch (e: any) {
-                    toast.error(e?.message || "全部启用失败");
-                  } finally {
-                    setBatchActionLoading(false);
-                  }
-                }}
-              >
-                全部启用
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                style={{ border: "1px solid var(--color-border)", padding: "6px 10px", fontSize: 12 }}
-                disabled={batchActionLoading || visibleAccounts.length === 0}
-                onClick={async () => {
-                  const ids = visibleAccounts
-                    .filter((a: any) => a?.status !== "disabled")
-                    .map((a: any) => Number(a.id))
-                    .filter((id: number) => Number.isFinite(id) && id > 0);
-                  if (ids.length === 0) {
-                    toast.info("当前筛选结果中没有可禁用的连接");
-                    return;
-                  }
-                  setBatchActionLoading(true);
-                  try {
-                    const result = await api.batchUpdateAccounts({ ids, action: "disable" });
-                    const ok = Array.isArray(result?.successIds) ? result.successIds.length : 0;
-                    const fail = Array.isArray(result?.failedItems) ? result.failedItems.length : 0;
-                    toast[fail > 0 ? "info" : "success"](
-                      fail > 0
-                        ? `全部禁用完成：成功 ${ok}，失败 ${fail}`
-                        : `已禁用 ${ok} 个连接`,
-                    );
-                    load(true);
-                  } catch (e: any) {
-                    toast.error(e?.message || "全部禁用失败");
-                  } finally {
-                    setBatchActionLoading(false);
-                  }
-                }}
-              >
-                全部禁用
-              </button>
-            </div>
-          </>
-        )}
       </div>
 
       <DeleteConfirmModal
@@ -2016,7 +1610,7 @@ export default function Accounts() {
         }
       />
 
-      {activeSegment !== "tokens" && selectedAccountIds.length > 0 && (
+      {selectedAccountIds.length > 0 && (
         <ResponsiveBatchActionBar
           isMobile={isMobile}
           info={`已选 ${selectedAccountIds.length} 项`}
@@ -2057,646 +1651,159 @@ export default function Accounts() {
         </ResponsiveBatchActionBar>
       )}
 
-      {activeSegment === "tokens" ? (
-        <TokensPanel
-          embedded
-          onEmbeddedActionsChange={setEmbeddedTokenActions}
-        />
-      ) : (
-        <>
-          <CenteredModal
-            open={showAdd}
-            onClose={closeAddPanel}
-            title={
-              activeSegment === "apikey"
-                ? "添加 API Key 连接"
-                : CHECKIN_MODE || addMode === "login"
-                  ? "账号密码登录"
-                  : "添加 Session 连接"
-            }
-            maxWidth={860}
-            bodyStyle={{ display: "flex", flexDirection: "column", gap: 12 }}
-            footer={
-              <button onClick={closeAddPanel} className="btn btn-ghost">
-                取消
-              </button>
-            }
-          >
-            {activeSegment === "session" ? (
-              <>
-                {!CHECKIN_MODE && <div
+      <>
+        <CenteredModal
+          open={showAdd}
+          onClose={closeAddPanel}
+          title={
+            CHECKIN_MODE || addMode === "login"
+              ? "账号密码登录"
+              : "添加 Session 连接"
+          }
+          maxWidth={860}
+          bodyStyle={{ display: "flex", flexDirection: "column", gap: 12 }}
+          footer={
+            <button onClick={closeAddPanel} className="btn btn-ghost">
+              取消
+            </button>
+          }
+        >
+          <>
+            {!CHECKIN_MODE && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 0,
+                  background: "var(--color-bg)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: 3,
+                  marginBottom: 16,
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setAddMode("token");
+                    setVerifyResult(null);
+                  }}
                   style={{
-                    display: "flex",
-                    gap: 0,
-                    background: "var(--color-bg)",
-                    borderRadius: "var(--radius-sm)",
-                    padding: 3,
-                    marginBottom: 16,
+                    flex: 1,
+                    padding: "8px 0",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    border: "none",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    background:
+                      addMode === "token"
+                        ? "var(--color-bg-card)"
+                        : "transparent",
+                    color:
+                      addMode === "token"
+                        ? "var(--color-primary)"
+                        : "var(--color-text-muted)",
+                    boxShadow:
+                      addMode === "token" ? "var(--shadow-sm)" : "none",
                   }}
                 >
-                  <button
-                    onClick={() => {
-                      setAddMode("token");
-                      setVerifyResult(null);
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: "8px 0",
-                      borderRadius: 6,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      border: "none",
-                      cursor: "pointer",
-                      transition: "all 0.2s",
-                      background:
-                        addMode === "token"
-                          ? "var(--color-bg-card)"
-                          : "transparent",
-                      color:
-                        addMode === "token"
-                          ? "var(--color-primary)"
-                          : "var(--color-text-muted)",
-                      boxShadow:
-                        addMode === "token" ? "var(--shadow-sm)" : "none",
-                    }}
-                  >
-                    Session Token / Cookie
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAddMode("login");
-                      setVerifyResult(null);
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: "8px 0",
-                      borderRadius: 6,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      border: "none",
-                      cursor: "pointer",
-                      transition: "all 0.2s",
-                      background:
-                        addMode === "login"
-                          ? "var(--color-bg-card)"
-                          : "transparent",
-                      color:
-                        addMode === "login"
-                          ? "var(--color-primary)"
-                          : "var(--color-text-muted)",
-                      boxShadow:
-                        addMode === "login" ? "var(--shadow-sm)" : "none",
-                    }}
-                  >
-                    账号密码登录
-                  </button>
-                </div>}
+                  Session Token / Cookie
+                </button>
+                <button
+                  onClick={() => {
+                    setAddMode("login");
+                    setVerifyResult(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "8px 0",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    border: "none",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    background:
+                      addMode === "login"
+                        ? "var(--color-bg-card)"
+                        : "transparent",
+                    color:
+                      addMode === "login"
+                        ? "var(--color-primary)"
+                        : "var(--color-text-muted)",
+                    boxShadow:
+                      addMode === "login" ? "var(--shadow-sm)" : "none",
+                  }}
+                >
+                  账号密码登录
+                </button>
+              </div>
+            )}
 
-                {!CHECKIN_MODE && addMode === "token" ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                    }}
-                  >
-                    <div className="info-tip">
-                      <div>
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                          当前分段仅创建 Session 连接
-                        </div>
-                        <div>
-                          <strong>推荐</strong> 使用系统访问令牌（Access
-                          Token）；浏览器 Cookie 仅用于兼容场景。
-                        </div>
-                        <div style={{ marginTop: 2 }}>
-                          以 NewAPI 为例：控制台 → 个人设置 → 安全设置 →
-                          生成「系统访问令牌」
-                        </div>
-                        <div
-                          style={{
-                            opacity: 0.7,
-                            borderTop: "1px solid rgba(0,0,0,0.1)",
-                            paddingTop: 6,
-                            marginTop: 6,
-                          }}
-                        >
-                          获取 Cookie:{" "}
-                          <kbd
-                            style={{
-                              padding: "1px 5px",
-                              background: "var(--color-bg-card)",
-                              border: "1px solid var(--color-border)",
-                              borderRadius: 3,
-                              fontSize: 11,
-                            }}
-                          >
-                            F12
-                          </kbd>{" "}
-                          → Application → Cookie
-                        </div>
-                        <div style={{ marginTop: 6 }}>
-                          <a
-                            href={SITE_DOCS_URL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              fontSize: 12,
-                              color: "var(--color-primary)",
-                              textDecoration: "underline",
-                            }}
-                          >
-                            查看认证方式与特殊站点说明文档
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                    <ModernSelect
-                      value={String(tokenForm.siteId || 0)}
-                      onChange={(nextValue) => {
-                        const nextSiteId = Number.parseInt(nextValue, 10) || 0;
-                        setTokenForm((f) => ({ ...f, siteId: nextSiteId }));
-                        setVerifyResult(null);
-                      }}
-                      options={siteSelectOptions}
-                      placeholder="选择站点"
-                      searchable
-                      searchPlaceholder={SITE_SELECT_SEARCH_PLACEHOLDER}
-                    />
-                    <input
-                      placeholder="连接名称（可选）"
-                      value={tokenForm.username}
-                      onChange={(e) =>
-                        setTokenForm((f) => ({
-                          ...f,
-                          username: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    <textarea
-                      placeholder="粘贴 Session Access Token 或浏览器 Cookie"
-                      value={tokenForm.accessToken}
-                      onChange={(e) => {
-                        setTokenForm((f) => ({
-                          ...f,
-                          accessToken: e.target.value.trim(),
-                        }));
-                        setVerifyResult(null);
-                      }}
-                      style={{
-                        ...inputStyle,
-                        fontFamily: "var(--font-mono)",
-                        height: 72,
-                        resize: "none" as const,
-                      }}
-                    />
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <input
-                        placeholder="用户 ID（可选）"
-                        value={tokenForm.platformUserId}
-                        onChange={(e) => {
-                          setTokenForm((f) => ({
-                            ...f,
-                            platformUserId: e.target.value.replace(/\D/g, ""),
-                          }));
-                          setVerifyResult(null);
-                        }}
-                        style={inputStyle}
-                      />
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "var(--color-text-muted)",
-                        }}
-                      >
-                        若站点要求 New-Api-User / User-ID，请在这里提前填写。
-                      </div>
-                    </div>
-                    {isSub2ApiSelected && (
-                      <>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <input
-                            placeholder="Sub2API refresh_token（可选，用于托管自动续期）"
-                            value={tokenForm.refreshToken}
-                            onChange={(e) =>
-                              setTokenForm((f) => ({
-                                ...f,
-                                refreshToken: e.target.value.trim(),
-                              }))
-                            }
-                            style={{
-                              ...inputStyle,
-                              fontFamily: "var(--font-mono)",
-                            }}
-                          />
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "var(--color-text-muted)",
-                            }}
-                          >
-                            可在浏览器控制台执行{" "}
-                            <code style={{ fontFamily: "var(--font-mono)" }}>
-                              localStorage.getItem('refresh_token')
-                            </code>{" "}
-                            获取。
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 4,
-                          }}
-                        >
-                          <input
-                            placeholder="token_expires_at（可选，毫秒时间戳）"
-                            value={tokenForm.tokenExpiresAt}
-                            onChange={(e) =>
-                              setTokenForm((f) => ({
-                                ...f,
-                                tokenExpiresAt: e.target.value.replace(
-                                  /\D/g,
-                                  "",
-                                ),
-                              }))
-                            }
-                            style={inputStyle}
-                          />
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "var(--color-text-muted)",
-                            }}
-                          >
-                            配置 refresh_token 后，metapi 会在 JWT 临近过期或
-                            401 时自动续期并回写新 token。
-                          </div>
-                        </div>
-                      </>
-                    )}
-                    {verifyResult &&
-                      verifyResult.success &&
-                      verifyResult.tokenType === "session" && (
-                        <div className="alert alert-success animate-scale-in">
-                          <div
-                            className="alert-title"
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                            }}
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                              />
-                            </svg>
-                            Session 凭证有效（Access Token / Cookie）
-                          </div>
-                          <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-                            <div>
-                              用户名:{" "}
-                              <strong>
-                                {verifyResult.userInfo?.username || "未知"}
-                              </strong>
-                            </div>
-                            {verifyResult.balance && (
-                              <div>
-                                余额:{" "}
-                                <strong>
-                                  $
-                                  {(verifyResult.balance.balance || 0).toFixed(
-                                    2,
-                                  )}
-                                </strong>
-                              </div>
-                            )}
-                            <div>
-                              API Key:{" "}
-                              <span
-                                style={{
-                                  fontWeight: 500,
-                                  color: verifyResult.apiToken
-                                    ? "var(--color-success)"
-                                    : "var(--color-text-muted)",
-                                }}
-                              >
-                                {verifyResult.apiToken
-                                  ? `已找到 (${verifyResult.apiToken.substring(0, 8)}...)`
-                                  : "未找到"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    {verifyResult &&
-                      verifyResult.success &&
-                      verifyResult.tokenType === "apikey" && (
-                        <div className="alert alert-warning animate-scale-in">
-                          <div className="alert-title">
-                            当前分段仅接受 Session 凭证，请切到「API Key
-                            连接」分段创建。
-                          </div>
-                        </div>
-                      )}
-                    {verifyResult &&
-                      !verifyResult.success &&
-                      verifyResult.needsUserId && (
-                        <div className="alert alert-warning animate-scale-in">
-                          <div className="alert-title">
-                            此站点要求用户 ID，请补充后重新验证
-                          </div>
-                        </div>
-                      )}
-                    {verifyResult &&
-                      !verifyResult.success &&
-                      !verifyResult.needsUserId && (
-                        <div className="alert alert-error animate-scale-in">
-                          <div className="alert-title">
-                            {normalizeVerifyFailureMessage(
-                              verifyResult.message,
-                            ) || "Token 无效或已过期"}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "var(--color-text-muted)",
-                              marginTop: 4,
-                            }}
-                          >
-                            {verifyFailureHint || "请检查 Token 是否正确"}
-                          </div>
-                        </div>
-                      )}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        onClick={handleVerifyToken}
-                        disabled={
-                          verifying ||
-                          !tokenForm.siteId ||
-                          !tokenForm.accessToken
-                        }
-                        className="btn btn-ghost"
-                        style={{
-                          border: "1px solid var(--color-border)",
-                          padding: "8px 14px",
-                        }}
-                      >
-                        {verifying ? (
-                          <>
-                            <span className="spinner spinner-sm" />
-                            验证中...
-                          </>
-                        ) : (
-                          "验证 Token"
-                        )}
-                      </button>
-                      <button
-                        onClick={handleTokenAdd}
-                        disabled={
-                          saving ||
-                          !tokenForm.siteId ||
-                          !tokenForm.accessToken ||
-                          !canAddVerifiedConnection
-                        }
-                        className="btn btn-success"
-                      >
-                        {saving ? (
-                          <>
-                            <span
-                              className="spinner spinner-sm"
-                              style={{
-                                borderTopColor: "white",
-                                borderColor: "rgba(255,255,255,0.3)",
-                              }}
-                            />
-                            添加中...
-                          </>
-                        ) : (
-                          "添加连接"
-                        )}
-                      </button>
-                    </div>
-                    {!verifyResult?.success && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "var(--color-text-muted)",
-                        }}
-                      >
-                        {addAccountPrereqHint}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                    }}
-                  >
-                    <div className="info-tip">
-                      输入目标站点的账号密码，将自动登录并获取访问令牌和 API Key
-                    </div>
-                    <ModernSelect
-                      value={String(loginForm.siteId || 0)}
-                      onChange={(nextValue) => {
-                        const nextSiteId = Number.parseInt(nextValue, 10) || 0;
-                        setLoginForm((f) => ({ ...f, siteId: nextSiteId }));
-                      }}
-                      options={siteSelectOptions}
-                      placeholder="选择站点"
-                      searchable
-                      searchPlaceholder={SITE_SELECT_SEARCH_PLACEHOLDER}
-                    />
-                    {CHECKIN_MODE && (
-                      <>
-                        <input
-                          placeholder="站点名称（可选）"
-                          value={loginForm.siteName}
-                          onChange={(e) =>
-                            setLoginForm((f) => ({ ...f, siteName: e.target.value }))
-                          }
-                          style={inputStyle}
-                        />
-                        <input
-                          placeholder="站点 Base URL / API URL"
-                          value={loginForm.siteUrl}
-                          onChange={(e) =>
-                            setLoginForm((f) => ({ ...f, siteUrl: e.target.value }))
-                          }
-                          style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
-                        />
-                        <ModernSelect
-                          value={loginForm.sitePlatform}
-                          onChange={(value) =>
-                            setLoginForm((f) => ({ ...f, sitePlatform: value }))
-                          }
-                          options={[
-                            { value: "new-api", label: "New API" },
-                            { value: "one-api", label: "One API" },
-                            { value: "veloera", label: "Veloera" },
-                            { value: "one-hub", label: "OneHub" },
-                            { value: "done-hub", label: "DoneHub" },
-                            { value: "anyrouter", label: "AnyRouter" },
-                            { value: "sub2api", label: "Sub2API" },
-                          ]}
-                          placeholder="站点平台"
-                        />
-                      </>
-                    )}
-                    <input
-                      placeholder="用户名"
-                      value={loginForm.username}
-                      onChange={(e) =>
-                        setLoginForm((f) => ({
-                          ...f,
-                          username: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                    <input
-                      type="password"
-                      placeholder="密码"
-                      value={loginForm.password}
-                      onChange={(e) =>
-                        setLoginForm((f) => ({
-                          ...f,
-                          password: e.target.value,
-                        }))
-                      }
-                      onKeyDown={(e) => e.key === "Enter" && handleLoginAdd()}
-                      style={inputStyle}
-                    />
-                    <button
-                      onClick={handleLoginAdd}
-                      disabled={
-                        saving ||
-                        (!loginForm.siteId && !loginForm.siteUrl.trim()) ||
-                        !loginForm.username ||
-                        !loginForm.password
-                      }
-                      className="btn btn-success"
-                      style={{ alignSelf: "flex-start" }}
-                    >
-                      {saving ? (
-                        <>
-                          <span
-                            className="spinner spinner-sm"
-                            style={{
-                              borderTopColor: "white",
-                              borderColor: "rgba(255,255,255,0.3)",
-                            }}
-                          />
-                          登录并添加...
-                        </>
-                      ) : (
-                        "登录并添加"
-                      )}
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
+            {!CHECKIN_MODE && addMode === "token" ? (
               <div
-                style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
               >
                 <div className="info-tip">
-                  API Key
-                  连接只用于代理转发，不会自动派生账号令牌。系统会按站点平台能力自动引导到
-                  Session 或 API Key 创建流程。
-                </div>
-                {createIntentPreset && (
-                  <div className="alert alert-info animate-scale-in">
-                    <div className="alert-title">
-                      {createIntentPreset.label}
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      当前分段仅创建 Session 连接
+                    </div>
+                    <div>
+                      <strong>推荐</strong> 使用系统访问令牌（Access
+                      Token）；浏览器 Cookie 仅用于兼容场景。
+                    </div>
+                    <div style={{ marginTop: 2 }}>
+                      以 NewAPI 为例：控制台 → 个人设置 → 安全设置 →
+                      生成「系统访问令牌」
                     </div>
                     <div
                       style={{
-                        fontSize: 12,
-                        color: "var(--color-text-muted)",
-                        marginTop: 4,
-                        lineHeight: 1.8,
+                        opacity: 0.7,
+                        borderTop: "1px solid rgba(0,0,0,0.1)",
+                        paddingTop: 6,
+                        marginTop: 6,
                       }}
                     >
-                      <div>{createIntentPreset.description}</div>
-                      <div>
-                        推荐模型：
-                        {createIntentPreset.recommendedModels.join(" / ")}
-                      </div>
-                      {createIntentPreset.recommendedSkipModelFetch && (
-                        <div>
-                          建议直接跳过模型验证，先保存 Base URL +
-                          Key，再补入推荐模型完成初始化。
-                        </div>
-                      )}
-                    </div>
-                    {createIntentPreset.recommendedModels.length > 0 && (
-                      <label
+                      获取 Cookie:{" "}
+                      <kbd
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          fontSize: 12,
-                          cursor: "pointer",
-                          marginTop: 8,
+                          padding: "1px 5px",
+                          background: "var(--color-bg-card)",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: 3,
+                          fontSize: 11,
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={applyCreatePresetModels}
-                          onChange={(e) =>
-                            setApplyCreatePresetModels(e.target.checked)
-                          }
-                          style={{ width: 14, height: 14 }}
-                        />
-                        <span>添加后自动补入推荐模型并重建路由</span>
-                      </label>
-                    )}
+                        F12
+                      </kbd>{" "}
+                      → Application → Cookie
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <a
+                        href={SITE_DOCS_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          fontSize: 12,
+                          color: "var(--color-primary)",
+                          textDecoration: "underline",
+                        }}
+                      >
+                        查看认证方式与特殊站点说明文档
+                      </a>
+                    </div>
                   </div>
-                )}
+                </div>
                 <ModernSelect
                   value={String(tokenForm.siteId || 0)}
                   onChange={(nextValue) => {
                     const nextSiteId = Number.parseInt(nextValue, 10) || 0;
-                    setTokenForm((f) => ({
-                      ...f,
-                      siteId: nextSiteId,
-                      credentialMode: "apikey",
-                    }));
+                    setTokenForm((f) => ({ ...f, siteId: nextSiteId }));
                     setVerifyResult(null);
-                    if (
-                      createIntentPresetId &&
-                      nextSiteId !== tokenForm.siteId
-                    ) {
-                      setCreateIntentPresetId(null);
-                      setApplyCreatePresetModels(false);
-                    }
                   }}
                   options={siteSelectOptions}
                   placeholder="选择站点"
@@ -2710,19 +1817,17 @@ export default function Accounts() {
                     setTokenForm((f) => ({
                       ...f,
                       username: e.target.value,
-                      credentialMode: "apikey",
                     }))
                   }
                   style={inputStyle}
                 />
                 <textarea
-                  placeholder="粘贴 API Key"
+                  placeholder="粘贴 Session Access Token 或浏览器 Cookie"
                   value={tokenForm.accessToken}
                   onChange={(e) => {
                     setTokenForm((f) => ({
                       ...f,
-                      accessToken: e.target.value,
-                      credentialMode: "apikey",
+                      accessToken: e.target.value.trim(),
                     }));
                     setVerifyResult(null);
                   }}
@@ -2733,21 +1838,12 @@ export default function Accounts() {
                     resize: "none" as const,
                   }}
                 />
-                {parsedApiKeys.length > 0 && (
-                  <div
-                    style={{ fontSize: 12, color: "var(--color-text-muted)" }}
-                  >
-                    已识别 {parsedApiKeys.length} 个 API Key
-                    {isBatchApiKeyInput
-                      ? "，添加时会逐条创建同站点连接并参与轮询"
-                      : ""}
-                  </div>
-                )}
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                  支持换行、空格、逗号批量粘贴多个 API Key。
-                </div>
                 <div
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
                 >
                   <input
                     placeholder="用户 ID（可选）"
@@ -2756,45 +1852,90 @@ export default function Accounts() {
                       setTokenForm((f) => ({
                         ...f,
                         platformUserId: e.target.value.replace(/\D/g, ""),
-                        credentialMode: "apikey",
                       }));
                       setVerifyResult(null);
                     }}
                     style={inputStyle}
                   />
                   <div
-                    style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+                    style={{
+                      fontSize: 12,
+                      color: "var(--color-text-muted)",
+                    }}
                   >
                     若站点要求 New-Api-User / User-ID，请在这里提前填写。
                   </div>
                 </div>
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    alignSelf: "flex-start",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!tokenForm.skipModelFetch}
-                    onChange={(e) =>
-                      setTokenForm((f) => ({
-                        ...f,
-                        skipModelFetch: e.target.checked,
-                      }))
-                    }
-                    style={{ width: 14, height: 14 }}
-                  />
-                  <span>跳过模型验证（直接添加 API Key）</span>
-                </label>
+                {isSub2ApiSelected && (
+                  <>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <input
+                        placeholder="Sub2API refresh_token（可选，用于托管自动续期）"
+                        value={tokenForm.refreshToken}
+                        onChange={(e) =>
+                          setTokenForm((f) => ({
+                            ...f,
+                            refreshToken: e.target.value.trim(),
+                          }))
+                        }
+                        style={{
+                          ...inputStyle,
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      />
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        可在浏览器控制台执行{" "}
+                        <code style={{ fontFamily: "var(--font-mono)" }}>
+                          localStorage.getItem('refresh_token')
+                        </code>{" "}
+                        获取。
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <input
+                        placeholder="token_expires_at（可选，毫秒时间戳）"
+                        value={tokenForm.tokenExpiresAt}
+                        onChange={(e) =>
+                          setTokenForm((f) => ({
+                            ...f,
+                            tokenExpiresAt: e.target.value.replace(/\D/g, ""),
+                          }))
+                        }
+                        style={inputStyle}
+                      />
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        配置 refresh_token 后，metapi 会在 JWT 临近过期或 401
+                        时自动续期并回写新 token。
+                      </div>
+                    </div>
+                  </>
+                )}
                 {verifyResult &&
                   verifyResult.success &&
-                  verifyResult.tokenType === "apikey" && (
-                    <div className="alert alert-info animate-scale-in">
+                  verifyResult.tokenType === "session" && (
+                    <div className="alert alert-success animate-scale-in">
                       <div
                         className="alert-title"
                         style={{
@@ -2814,31 +1955,51 @@ export default function Accounts() {
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             strokeWidth={2}
-                            d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                           />
                         </svg>
-                        API Key 验证成功
+                        Session 凭证有效（Access Token / Cookie）
                       </div>
                       <div style={{ fontSize: 12, lineHeight: 1.8 }}>
                         <div>
-                          可用模型:{" "}
-                          <strong>{verifyResult.modelCount} 个</strong>
+                          用户名:{" "}
+                          <strong>
+                            {verifyResult.userInfo?.username || "未知"}
+                          </strong>
                         </div>
-                        {verifyResult.models && (
-                          <div style={{ color: "var(--color-text-muted)" }}>
-                            包含: {verifyResult.models.join(", ")}
-                            {verifyResult.modelCount > 10 ? " ..." : ""}
+                        {verifyResult.balance && (
+                          <div>
+                            余额:{" "}
+                            <strong>
+                              ${(verifyResult.balance.balance || 0).toFixed(2)}
+                            </strong>
                           </div>
                         )}
+                        <div>
+                          API Key:{" "}
+                          <span
+                            style={{
+                              fontWeight: 500,
+                              color: verifyResult.apiToken
+                                ? "var(--color-success)"
+                                : "var(--color-text-muted)",
+                            }}
+                          >
+                            {verifyResult.apiToken
+                              ? `已找到 (${verifyResult.apiToken.substring(0, 8)}...)`
+                              : "未找到"}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}
                 {verifyResult &&
                   verifyResult.success &&
-                  verifyResult.tokenType === "session" && (
+                  verifyResult.tokenType === "apikey" && (
                     <div className="alert alert-warning animate-scale-in">
                       <div className="alert-title">
-                        当前分段仅接受 API Key，请切到「Session 连接」分段创建。
+                        当前分段仅接受 Session 凭证，请切到「API Key
+                        连接」分段创建。
                       </div>
                     </div>
                   )}
@@ -2874,10 +2035,7 @@ export default function Accounts() {
                   <button
                     onClick={handleVerifyToken}
                     disabled={
-                      verifying ||
-                      !tokenForm.siteId ||
-                      !tokenForm.accessToken ||
-                      isBatchApiKeyInput
+                      verifying || !tokenForm.siteId || !tokenForm.accessToken
                     }
                     className="btn btn-ghost"
                     style={{
@@ -2890,10 +2048,8 @@ export default function Accounts() {
                         <span className="spinner spinner-sm" />
                         验证中...
                       </>
-                    ) : isBatchApiKeyInput ? (
-                      "批量添加时校验"
                     ) : (
-                      "验证 API Key"
+                      "验证 Token"
                     )}
                   </button>
                   <button
@@ -2902,7 +2058,7 @@ export default function Accounts() {
                       saving ||
                       !tokenForm.siteId ||
                       !tokenForm.accessToken ||
-                      !canSubmitApiKeyConnection
+                      !canAddVerifiedConnection
                     }
                     className="btn btn-success"
                   >
@@ -2917,8 +2073,6 @@ export default function Accounts() {
                         />
                         添加中...
                       </>
-                    ) : isBatchApiKeyInput ? (
-                      "批量添加连接"
                     ) : (
                       "添加连接"
                     )}
@@ -2926,229 +2080,112 @@ export default function Accounts() {
                 </div>
                 {!verifyResult?.success && (
                   <div
-                    style={{ fontSize: 12, color: "var(--color-text-muted)" }}
-                  >
-                    {isBatchApiKeyInput
-                      ? "批量模式下无需先点验证，提交后会逐条校验并创建。"
-                      : addAccountPrereqHint}
-                  </div>
-                )}
-              </div>
-            )}
-          </CenteredModal>
-
-          {activeSegment === "session" && (
-            <CenteredModal
-              open={Boolean(rebindTarget)}
-              onClose={closeRebindPanel}
-              title="重新绑定 Session Token"
-              maxWidth={820}
-              bodyStyle={{ display: "flex", flexDirection: "column", gap: 12 }}
-              footer={
-                <button onClick={closeRebindPanel} className="btn btn-ghost">
-                  取消
-                </button>
-              }
-            >
-              {activeRebindTarget ? (
-                <>
-                  <div
                     style={{
                       fontSize: 12,
                       color: "var(--color-text-muted)",
-                      marginBottom: 12,
                     }}
                   >
-                    连接: {resolveAccountDisplayName(activeRebindTarget)} @{" "}
-                    {activeRebindTarget.site?.name || "-"}。请粘贴新的 Session
-                    Token，验证成功后再绑定。
+                    {addAccountPrereqHint}
                   </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0, 1fr) 220px",
-                      gap: 10,
-                      marginBottom: 10,
-                    }}
-                  >
-                    <textarea
-                      placeholder="粘贴新的 Session Token"
-                      value={rebindForm.accessToken}
-                      onChange={(e) => {
-                        setRebindForm((prev) => ({
-                          ...prev,
-                          accessToken: e.target.value.trim(),
-                        }));
-                        setRebindVerifyResult(null);
-                      }}
-                      style={{
-                        ...inputStyle,
-                        fontFamily: "var(--font-mono)",
-                        height: 74,
-                        resize: "none" as const,
-                      }}
-                    />
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div className="info-tip">
+                  输入目标站点的账号密码，将自动登录并获取访问令牌和 API Key
+                </div>
+                <ModernSelect
+                  value={String(loginForm.siteId || 0)}
+                  onChange={(nextValue) => {
+                    const nextSiteId = Number.parseInt(nextValue, 10) || 0;
+                    setLoginForm((f) => ({ ...f, siteId: nextSiteId }));
+                  }}
+                  options={siteSelectOptions}
+                  placeholder="选择站点"
+                  searchable
+                  searchPlaceholder={SITE_SELECT_SEARCH_PLACEHOLDER}
+                />
+                {CHECKIN_MODE && (
+                  <>
                     <input
-                      placeholder="用户 ID（可选）"
-                      value={rebindForm.platformUserId}
-                      onChange={(e) => {
-                        setRebindForm((prev) => ({
-                          ...prev,
-                          platformUserId: e.target.value.replace(/\D/g, ""),
-                        }));
-                        setRebindVerifyResult(null);
-                      }}
+                      placeholder="站点名称（可选）"
+                      value={loginForm.siteName}
+                      onChange={(e) =>
+                        setLoginForm((f) => ({
+                          ...f,
+                          siteName: e.target.value,
+                        }))
+                      }
                       style={inputStyle}
                     />
-                  </div>
-                  {isRebindSub2Api && (
-                    <>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(0, 1fr) 220px",
-                          gap: 10,
-                          marginBottom: 4,
-                        }}
-                      >
-                        <input
-                          placeholder="Sub2API refresh_token（可选）"
-                          value={rebindForm.refreshToken}
-                          onChange={(e) =>
-                            setRebindForm((prev) => ({
-                              ...prev,
-                              refreshToken: e.target.value.trim(),
-                            }))
-                          }
-                          style={{
-                            ...inputStyle,
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        />
-                        <input
-                          placeholder="token_expires_at（可选）"
-                          value={rebindForm.tokenExpiresAt}
-                          onChange={(e) =>
-                            setRebindForm((prev) => ({
-                              ...prev,
-                              tokenExpiresAt: e.target.value.replace(/\D/g, ""),
-                            }))
-                          }
-                          style={inputStyle}
-                        />
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "var(--color-text-muted)",
-                          marginBottom: 10,
-                        }}
-                      >
-                        留空将保持原有 refresh_token
-                        不变。配置后可用于托管自动续期。
-                      </div>
-                    </>
-                  )}
-
-                  {rebindVerifyResult &&
-                    rebindVerifyResult.success &&
-                    rebindVerifyResult.tokenType === "session" && (
-                      <div
-                        className="alert alert-success animate-scale-in"
-                        style={{ marginBottom: 10 }}
-                      >
-                        <div className="alert-title">Session Token 有效</div>
-                        <div style={{ fontSize: 12, marginTop: 4 }}>
-                          用户:{" "}
-                          {rebindVerifyResult.userInfo?.username || "未知"}
-                          {rebindVerifyResult.apiToken
-                            ? `，已识别 API Key (${String(rebindVerifyResult.apiToken).slice(0, 8)}...)`
-                            : ""}
-                        </div>
-                      </div>
-                    )}
-                  {rebindVerifyResult &&
-                    (!rebindVerifyResult.success ||
-                      rebindVerifyResult.tokenType !== "session") && (
-                      <div
-                        className="alert alert-error animate-scale-in"
-                        style={{ marginBottom: 10 }}
-                      >
-                        <div className="alert-title">
-                          {rebindVerifyResult.message ||
-                            "Token 无效或类型不正确"}
-                        </div>
-                      </div>
-                    )}
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={handleVerifyRebindToken}
-                      disabled={
-                        rebindVerifying || !rebindForm.accessToken.trim()
+                    <input
+                      placeholder="站点 Base URL / API URL"
+                      value={loginForm.siteUrl}
+                      onChange={(e) =>
+                        setLoginForm((f) => ({ ...f, siteUrl: e.target.value }))
                       }
-                      className="btn btn-ghost"
-                      style={{ border: "1px solid var(--color-border)" }}
-                    >
-                      {rebindVerifying ? (
-                        <>
-                          <span className="spinner spinner-sm" />
-                          验证中...
-                        </>
-                      ) : (
-                        "验证 Token"
-                      )}
-                    </button>
-                    <button
-                      onClick={handleSubmitRebind}
-                      disabled={
-                        rebindSaving ||
-                        !(
-                          rebindVerifyResult?.success &&
-                          rebindVerifyResult?.tokenType === "session"
-                        )
+                      style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                    />
+                    <ModernSelect
+                      value={loginForm.sitePlatform}
+                      onChange={(value) =>
+                        setLoginForm((f) => ({ ...f, sitePlatform: value }))
                       }
-                      className="btn btn-success"
-                    >
-                      {rebindSaving ? (
-                        <>
-                          <span
-                            className="spinner spinner-sm"
-                            style={{
-                              borderTopColor: "white",
-                              borderColor: "rgba(255,255,255,0.3)",
-                            }}
-                          />
-                          绑定中...
-                        </>
-                      ) : (
-                        "确认重新绑定"
-                      )}
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </CenteredModal>
-          )}
-
-          <CenteredModal
-            open={Boolean(editingAccount)}
-            onClose={closeEditPanel}
-            title="编辑账号"
-            maxWidth={860}
-            bodyStyle={{ display: "flex", flexDirection: "column", gap: 12 }}
-            footer={
-              <>
-                <button onClick={closeEditPanel} className="btn btn-ghost">
-                  取消
-                </button>
+                      options={[
+                        { value: "new-api", label: "New API" },
+                        { value: "one-api", label: "One API" },
+                        { value: "veloera", label: "Veloera" },
+                        { value: "one-hub", label: "OneHub" },
+                        { value: "done-hub", label: "DoneHub" },
+                        { value: "anyrouter", label: "AnyRouter" },
+                        { value: "sub2api", label: "Sub2API" },
+                      ]}
+                      placeholder="站点平台"
+                    />
+                  </>
+                )}
+                <input
+                  placeholder="用户名"
+                  value={loginForm.username}
+                  onChange={(e) =>
+                    setLoginForm((f) => ({
+                      ...f,
+                      username: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+                <input
+                  type="password"
+                  placeholder="密码"
+                  value={loginForm.password}
+                  onChange={(e) =>
+                    setLoginForm((f) => ({
+                      ...f,
+                      password: e.target.value,
+                    }))
+                  }
+                  onKeyDown={(e) => e.key === "Enter" && handleLoginAdd()}
+                  style={inputStyle}
+                />
                 <button
-                  onClick={saveEditPanel}
-                  disabled={savingEdit}
-                  className="btn btn-primary"
+                  onClick={handleLoginAdd}
+                  disabled={
+                    saving ||
+                    (!loginForm.siteId && !loginForm.siteUrl.trim()) ||
+                    !loginForm.username ||
+                    !loginForm.password
+                  }
+                  className="btn btn-success"
+                  style={{ alignSelf: "flex-start" }}
                 >
-                  {savingEdit ? (
+                  {saving ? (
                     <>
                       <span
                         className="spinner spinner-sm"
@@ -3156,790 +2193,501 @@ export default function Accounts() {
                           borderTopColor: "white",
                           borderColor: "rgba(255,255,255,0.3)",
                         }}
-                      />{" "}
-                      保存中...
+                      />
+                      登录并添加...
                     </>
                   ) : (
-                    "保存修改"
+                    "登录并添加"
                   )}
                 </button>
-              </>
+              </div>
+            )}
+          </>
+        </CenteredModal>
+
+        {
+          <CenteredModal
+            open={Boolean(rebindTarget)}
+            onClose={closeRebindPanel}
+            title="重新绑定 Session Token"
+            maxWidth={820}
+            bodyStyle={{ display: "flex", flexDirection: "column", gap: 12 }}
+            footer={
+              <button onClick={closeRebindPanel} className="btn btn-ghost">
+                取消
+              </button>
             }
           >
-            {editingAccount ? (
-              <ResponsiveFormGrid>
-                <input
-                  placeholder="账号名称"
-                  value={editForm.username}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      username: e.target.value,
-                    }))
-                  }
-                  style={inputStyle}
-                />
-                <ModernSelect
-                  value={editForm.status}
-                  onChange={(value) =>
-                    setEditForm((prev) => ({ ...prev, status: value }))
-                  }
-                  options={[
-                    { value: "active", label: "active" },
-                    { value: "disabled", label: "disabled" },
-                    { value: "expired", label: "expired" },
-                  ]}
-                  placeholder="状态"
-                />
-                <input
-                  placeholder="单位成本（可选）"
-                  value={editForm.unitCost}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      unitCost: e.target.value,
-                    }))
-                  }
-                  style={inputStyle}
-                />
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    ...inputStyle,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={editForm.checkinEnabled}
-                    onChange={(e) =>
-                      setEditForm((prev) => ({
-                        ...prev,
-                        checkinEnabled: e.target.checked,
-                      }))
-                    }
-                  />
-                  启用签到
-                </label>
-                <input
-                  placeholder="Access Token"
-                  value={editForm.accessToken}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      accessToken: e.target.value,
-                    }))
-                  }
-                  style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
-                />
-                <input
-                  placeholder="API Token（可选）"
-                  value={editForm.apiToken}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      apiToken: e.target.value,
-                    }))
-                  }
-                  style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
-                />
-                <input
-                  placeholder="代理地址（可选，如 http://127.0.0.1:7890）"
-                  value={editForm.proxyUrl}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      proxyUrl: e.target.value,
-                    }))
-                  }
-                  style={inputStyle}
-                />
+            {activeRebindTarget ? (
+              <>
                 <div
                   style={{
                     fontSize: 12,
                     color: "var(--color-text-muted)",
-                    marginTop: -4,
+                    marginBottom: 12,
                   }}
                 >
-                  覆盖站点和系统代理，留空则使用站点设置。支持 http/https/socks5
-                  协议。
+                  连接: {resolveAccountDisplayName(activeRebindTarget)} @{" "}
+                  {activeRebindTarget.site?.name || "-"}。请粘贴新的 Session
+                  Token，验证成功后再绑定。
                 </div>
-                {(editingAccount?.site?.platform || "").toLowerCase() ===
-                  "sub2api" && (
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) 220px",
+                    gap: 10,
+                    marginBottom: 10,
+                  }}
+                >
+                  <textarea
+                    placeholder="粘贴新的 Session Token"
+                    value={rebindForm.accessToken}
+                    onChange={(e) => {
+                      setRebindForm((prev) => ({
+                        ...prev,
+                        accessToken: e.target.value.trim(),
+                      }));
+                      setRebindVerifyResult(null);
+                    }}
+                    style={{
+                      ...inputStyle,
+                      fontFamily: "var(--font-mono)",
+                      height: 74,
+                      resize: "none" as const,
+                    }}
+                  />
+                  <input
+                    placeholder="用户 ID（可选）"
+                    value={rebindForm.platformUserId}
+                    onChange={(e) => {
+                      setRebindForm((prev) => ({
+                        ...prev,
+                        platformUserId: e.target.value.replace(/\D/g, ""),
+                      }));
+                      setRebindVerifyResult(null);
+                    }}
+                    style={inputStyle}
+                  />
+                </div>
+                {isRebindSub2Api && (
                   <>
-                    <input
-                      placeholder="Sub2API refresh_token（可选）"
-                      value={editForm.refreshToken}
-                      onChange={(e) =>
-                        setEditForm((prev) => ({
-                          ...prev,
-                          refreshToken: e.target.value,
-                        }))
-                      }
-                      style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
-                    />
-                    <input
-                      placeholder="token_expires_at（可选）"
-                      value={editForm.tokenExpiresAt}
-                      onChange={(e) =>
-                        setEditForm((prev) => ({
-                          ...prev,
-                          tokenExpiresAt: e.target.value.replace(/\D/g, ""),
-                        }))
-                      }
-                      style={inputStyle}
-                    />
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) 220px",
+                        gap: 10,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <input
+                        placeholder="Sub2API refresh_token（可选）"
+                        value={rebindForm.refreshToken}
+                        onChange={(e) =>
+                          setRebindForm((prev) => ({
+                            ...prev,
+                            refreshToken: e.target.value.trim(),
+                          }))
+                        }
+                        style={{
+                          ...inputStyle,
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      />
+                      <input
+                        placeholder="token_expires_at（可选）"
+                        value={rebindForm.tokenExpiresAt}
+                        onChange={(e) =>
+                          setRebindForm((prev) => ({
+                            ...prev,
+                            tokenExpiresAt: e.target.value.replace(/\D/g, ""),
+                          }))
+                        }
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--color-text-muted)",
+                        marginBottom: 10,
+                      }}
+                    >
+                      留空将保持原有 refresh_token
+                      不变。配置后可用于托管自动续期。
+                    </div>
                   </>
                 )}
-              </ResponsiveFormGrid>
+
+                {rebindVerifyResult &&
+                  rebindVerifyResult.success &&
+                  rebindVerifyResult.tokenType === "session" && (
+                    <div
+                      className="alert alert-success animate-scale-in"
+                      style={{ marginBottom: 10 }}
+                    >
+                      <div className="alert-title">Session Token 有效</div>
+                      <div style={{ fontSize: 12, marginTop: 4 }}>
+                        用户: {rebindVerifyResult.userInfo?.username || "未知"}
+                        {rebindVerifyResult.apiToken
+                          ? `，已识别 API Key (${String(rebindVerifyResult.apiToken).slice(0, 8)}...)`
+                          : ""}
+                      </div>
+                    </div>
+                  )}
+                {rebindVerifyResult &&
+                  (!rebindVerifyResult.success ||
+                    rebindVerifyResult.tokenType !== "session") && (
+                    <div
+                      className="alert alert-error animate-scale-in"
+                      style={{ marginBottom: 10 }}
+                    >
+                      <div className="alert-title">
+                        {rebindVerifyResult.message || "Token 无效或类型不正确"}
+                      </div>
+                    </div>
+                  )}
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={handleVerifyRebindToken}
+                    disabled={rebindVerifying || !rebindForm.accessToken.trim()}
+                    className="btn btn-ghost"
+                    style={{ border: "1px solid var(--color-border)" }}
+                  >
+                    {rebindVerifying ? (
+                      <>
+                        <span className="spinner spinner-sm" />
+                        验证中...
+                      </>
+                    ) : (
+                      "验证 Token"
+                    )}
+                  </button>
+                  <button
+                    onClick={handleSubmitRebind}
+                    disabled={
+                      rebindSaving ||
+                      !(
+                        rebindVerifyResult?.success &&
+                        rebindVerifyResult?.tokenType === "session"
+                      )
+                    }
+                    className="btn btn-success"
+                  >
+                    {rebindSaving ? (
+                      <>
+                        <span
+                          className="spinner spinner-sm"
+                          style={{
+                            borderTopColor: "white",
+                            borderColor: "rgba(255,255,255,0.3)",
+                          }}
+                        />
+                        绑定中...
+                      </>
+                    ) : (
+                      "确认重新绑定"
+                    )}
+                  </button>
+                </div>
+              </>
             ) : null}
           </CenteredModal>
+        }
 
-          <div className="card" style={{ overflowX: "auto" }}>
-            {visibleAccounts.length > 0 ? (
-              isMobile ? (
-                <div className="mobile-card-list">
-                  {displayedAccounts.map((a: any) => {
-                    const capabilities = resolveAccountCapabilities(a);
-                    const connectionMode = resolveAccountCredentialMode(a);
-                    const health = resolveRuntimeHealth(a);
-                    const isExpanded = expandedAccountIds.includes(a.id);
-                    const hintMessage =
-                      a.status === "expired" && !capabilities.proxyOnly
-                        ? "账号已过期，请重新绑定"
-                        : health.reason || "-";
-                    return (
-                      <MobileCard
-                        key={a.id}
-                        title={resolveAccountDisplayName(a)}
-                        headerActions={
+        <CenteredModal
+          open={Boolean(editingAccount)}
+          onClose={closeEditPanel}
+          title="编辑账号"
+          maxWidth={860}
+          bodyStyle={{ display: "flex", flexDirection: "column", gap: 12 }}
+          footer={
+            <>
+              <button onClick={closeEditPanel} className="btn btn-ghost">
+                取消
+              </button>
+              <button
+                onClick={saveEditPanel}
+                disabled={savingEdit}
+                className="btn btn-primary"
+              >
+                {savingEdit ? (
+                  <>
+                    <span
+                      className="spinner spinner-sm"
+                      style={{
+                        borderTopColor: "white",
+                        borderColor: "rgba(255,255,255,0.3)",
+                      }}
+                    />{" "}
+                    保存中...
+                  </>
+                ) : (
+                  "保存修改"
+                )}
+              </button>
+            </>
+          }
+        >
+          {editingAccount ? (
+            <ResponsiveFormGrid>
+              <input
+                placeholder="账号名称"
+                value={editForm.username}
+                onChange={(e) =>
+                  setEditForm((prev) => ({
+                    ...prev,
+                    username: e.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+              <ModernSelect
+                value={editForm.status}
+                onChange={(value) =>
+                  setEditForm((prev) => ({ ...prev, status: value }))
+                }
+                options={[
+                  { value: "active", label: "active" },
+                  { value: "disabled", label: "disabled" },
+                  { value: "expired", label: "expired" },
+                ]}
+                placeholder="状态"
+              />
+              <input
+                placeholder="单位成本（可选）"
+                value={editForm.unitCost}
+                onChange={(e) =>
+                  setEditForm((prev) => ({
+                    ...prev,
+                    unitCost: e.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  ...inputStyle,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={editForm.checkinEnabled}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      checkinEnabled: e.target.checked,
+                    }))
+                  }
+                />
+                启用签到
+              </label>
+              <input
+                placeholder="Access Token"
+                value={editForm.accessToken}
+                onChange={(e) =>
+                  setEditForm((prev) => ({
+                    ...prev,
+                    accessToken: e.target.value,
+                  }))
+                }
+                style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+              />
+              <input
+                placeholder="API Token（可选）"
+                value={editForm.apiToken}
+                onChange={(e) =>
+                  setEditForm((prev) => ({
+                    ...prev,
+                    apiToken: e.target.value,
+                  }))
+                }
+                style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+              />
+              <input
+                placeholder="代理地址（可选，如 http://127.0.0.1:7890）"
+                value={editForm.proxyUrl}
+                onChange={(e) =>
+                  setEditForm((prev) => ({
+                    ...prev,
+                    proxyUrl: e.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-muted)",
+                  marginTop: -4,
+                }}
+              >
+                覆盖站点和系统代理，留空则使用站点设置。支持 http/https/socks5
+                协议。
+              </div>
+              {(editingAccount?.site?.platform || "").toLowerCase() ===
+                "sub2api" && (
+                <>
+                  <input
+                    placeholder="Sub2API refresh_token（可选）"
+                    value={editForm.refreshToken}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        refreshToken: e.target.value,
+                      }))
+                    }
+                    style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+                  />
+                  <input
+                    placeholder="token_expires_at（可选）"
+                    value={editForm.tokenExpiresAt}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        tokenExpiresAt: e.target.value.replace(/\D/g, ""),
+                      }))
+                    }
+                    style={inputStyle}
+                  />
+                </>
+              )}
+            </ResponsiveFormGrid>
+          ) : null}
+        </CenteredModal>
+
+        <div className="card" style={{ overflowX: "auto" }}>
+          {visibleAccounts.length > 0 ? (
+            isMobile ? (
+              <div className="mobile-card-list">
+                {displayedAccounts.map((a: any) => {
+                  const capabilities = resolveAccountCapabilities(a);
+                  const connectionMode = resolveAccountCredentialMode(a);
+                  const health = resolveRuntimeHealth(a);
+                  const isExpanded = expandedAccountIds.includes(a.id);
+                  const hintMessage =
+                    a.status === "expired" && !capabilities.proxyOnly
+                      ? "账号已过期，请重新绑定"
+                      : health.reason || "-";
+                  return (
+                    <MobileCard
+                      key={a.id}
+                      title={resolveAccountDisplayName(a)}
+                      headerActions={
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`选择账号 ${resolveAccountDisplayName(a)}`}
+                            checked={selectedAccountIds.includes(a.id)}
+                            onChange={(event) =>
+                              toggleAccountSelection(a.id, event.target.checked)
+                            }
+                          />
+                          <span
+                            className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
+                            style={{ fontSize: 10 }}
+                          >
+                            {connectionMode === "apikey"
+                              ? "API Key"
+                              : "Session"}
+                          </span>
+                          {parseAccountExtraConfig(a)?.proxyUrl && (
+                            <span
+                              className="badge badge-purple"
+                              style={{ fontSize: 10 }}
+                            >
+                              代理
+                            </span>
+                          )}
+                        </div>
+                      }
+                      footerActions={
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => toggleAccountDetails(a.id)}
+                            className="btn btn-link"
+                          >
+                            {isExpanded ? "收起" : "详情"}
+                          </button>
+                          <button
+                            onClick={() => openCopyAccountPanel(a)}
+                            className="btn btn-link btn-link-primary"
+                          >
+                            复制
+                          </button>
+                          <button
+                            onClick={() => openEditPanel(a)}
+                            className="btn btn-link btn-link-info"
+                          >
+                            编辑
+                          </button>
+                          <button
+                            onClick={() => openModelModal(a)}
+                            disabled={actionLoading[`models-${a.id}`]}
+                            className="btn btn-link btn-link-info"
+                          >
+                            模型
+                          </button>
+                        </>
+                      }
+                    >
+                      <MobileField
+                        label="运行健康状态"
+                        value={
                           <div
                             style={{
                               display: "flex",
-                              alignItems: "center",
-                              gap: 6,
+                              flexDirection: "column",
+                              gap: 4,
                             }}
                           >
-                            <input
-                              type="checkbox"
-                              aria-label={`选择账号 ${resolveAccountDisplayName(a)}`}
-                              checked={selectedAccountIds.includes(a.id)}
-                              onChange={(event) =>
-                                toggleAccountSelection(
-                                  a.id,
-                                  event.target.checked,
-                                )
-                              }
-                            />
                             <span
-                              className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
-                              style={{ fontSize: 10 }}
-                            >
-                              {connectionMode === "apikey"
-                                ? "API Key"
-                                : "Session"}
-                            </span>
-                            {parseAccountExtraConfig(a)?.proxyUrl && (
-                              <span
-                                className="badge badge-purple"
-                                style={{ fontSize: 10 }}
-                              >
-                                代理
-                              </span>
-                            )}
-                          </div>
-                        }
-                        footerActions={
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => toggleAccountDetails(a.id)}
-                              className="btn btn-link"
-                            >
-                              {isExpanded ? "收起" : "详情"}
-                            </button>
-                            <button
-                              onClick={() => openCopyAccountPanel(a)}
-                              className="btn btn-link btn-link-primary"
-                            >
-                              复制
-                            </button>
-                            <button
-                              onClick={() => openEditPanel(a)}
-                              className="btn btn-link btn-link-info"
-                            >
-                              编辑
-                            </button>
-                            <button
-                              onClick={() => openModelModal(a)}
-                              disabled={actionLoading[`models-${a.id}`]}
-                              className="btn btn-link btn-link-info"
-                            >
-                              模型
-                            </button>
-                          </>
-                        }
-                      >
-                        <MobileField
-                          label="运行健康状态"
-                          value={
-                            <div
+                              className={`badge ${health.cls}`}
                               style={{
-                                display: "flex",
-                                flexDirection: "column",
+                                fontSize: 11,
+                                display: "inline-flex",
+                                alignItems: "center",
                                 gap: 4,
+                                width: "fit-content",
                               }}
                             >
                               <span
-                                className={`badge ${health.cls}`}
-                                style={{
-                                  fontSize: 11,
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 4,
-                                  width: "fit-content",
-                                }}
-                              >
-                                <span
-                                  className={`status-dot ${health.dotClass} ${health.pulse ? "animate-pulse-dot" : ""}`}
-                                  style={{ marginRight: 0 }}
-                                />
-                                {health.label}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: "var(--color-text-muted)",
-                                  maxWidth: 240,
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                                data-tooltip={health.reason}
-                              >
-                                {health.reason}
-                              </span>
-                            </div>
-                          }
-                        />
-                        <MobileField
-                          label="余额"
-                          value={
-                            <div>
-                              <div
-                                style={{
-                                  fontWeight: 600,
-                                  color: "var(--color-text-primary)",
-                                }}
-                              >
-                                ${(a.balance || 0).toFixed(2)}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  color:
-                                    (a.todayReward || 0) > 0
-                                      ? "var(--color-success)"
-                                      : "var(--color-text-muted)",
-                                  fontWeight: 500,
-                                }}
-                              >
-                                +{(a.todayReward || 0).toFixed(2)}
-                              </div>
-                            </div>
-                          }
-                        />
-                        <MobileField
-                          label="已用"
-                          value={
-                            <div>
-                              <div>${(a.balanceUsed || 0).toFixed(2)}</div>
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  color:
-                                    (a.todaySpend || 0) > 0
-                                      ? "var(--color-danger)"
-                                      : "var(--color-text-muted)",
-                                  fontWeight: 500,
-                                }}
-                              >
-                                -{(a.todaySpend || 0).toFixed(2)}
-                              </div>
-                            </div>
-                          }
-                        />
-                        <MobileField
-                          label="启用模型"
-                          value={
-                            <EnabledModelsSummary
-                              models={a.enabledModels || []}
-                            />
-                          }
-                          stacked
-                        />
-                        {isExpanded ? (
-                          <div className="mobile-card-extra">
-                            <MobileField
-                              label="站点"
-                              value={
-                                <SiteBadgeLink
-                                  siteId={a.site?.id}
-                                  siteName={a.site?.name}
-                                  badgeStyle={{ fontSize: 11 }}
-                                />
-                              }
-                            />
-                            <MobileField
-                              label="签到"
-                              value={
-                                capabilities.canCheckin ? (
-                                  <button
-                                    type="button"
-                                    className={`checkin-toggle-badge ${a.checkinEnabled ? "is-on" : "is-off"}`}
-                                    onClick={() => handleToggleCheckin(a)}
-                                    disabled={
-                                      !!actionLoading[`checkin-toggle-${a.id}`]
-                                    }
-                                    data-tooltip={
-                                      a.checkinEnabled
-                                        ? "点击关闭签到，全部签到会忽略此账号"
-                                        : "点击开启签到"
-                                    }
-                                    aria-label={
-                                      a.checkinEnabled
-                                        ? "点击关闭签到，全部签到会忽略此账号"
-                                        : "点击开启签到"
-                                    }
-                                  >
-                                    {actionLoading[`checkin-toggle-${a.id}`] ? (
-                                      <span className="spinner spinner-sm" />
-                                    ) : a.checkinEnabled ? (
-                                      "开启"
-                                    ) : (
-                                      "关闭"
-                                    )}
-                                  </button>
-                                ) : (
-                                  <span
-                                    className="badge badge-muted"
-                                    style={{ fontSize: 11, whiteSpace: "nowrap" }}
-                                  >
-                                    不支持
-                                  </span>
-                                )
-                              }
-                            />
-                            <MobileField
-                              label="账号状态"
-                              value={
-                                a.status === "expired"
-                                  ? "已过期"
-                                  : a.status || "-"
-                              }
-                            />
-                            {activeSegment === "apikey" ? (
-                              <MobileField
-                                label="状态"
-                                value={
-                                  <button
-                                    type="button"
-                                    className="sites-status-toggle"
-                                    onClick={() => handleToggleAccountStatus(a)}
-                                    disabled={
-                                      !!actionLoading[`status-toggle-${a.id}`]
-                                    }
-                                    data-testid={`account-status-toggle-${a.id}`}
-                                    title={
-                                      a.status === "disabled"
-                                        ? "点击启用"
-                                        : "点击禁用"
-                                    }
-                                    aria-label={
-                                      a.status === "disabled"
-                                        ? "点击启用"
-                                        : "点击禁用"
-                                    }
-                                  >
-                                    {actionLoading[`status-toggle-${a.id}`] ? (
-                                      <span className="spinner spinner-sm" />
-                                    ) : (
-                                      <span
-                                        className={`badge ${a.status === "disabled" ? "badge-muted" : "badge-success"}`}
-                                        style={{
-                                          fontSize: 13,
-                                          fontWeight: 700,
-                                          padding: "6px 14px",
-                                          borderRadius: 999,
-                                          minWidth: 56,
-                                          justifyContent: "center",
-                                        }}
-                                      >
-                                        {a.status === "disabled" ? "启用" : "禁用"}
-                                      </span>
-                                    )}
-                                  </button>
-                                }
+                                className={`status-dot ${health.dotClass} ${health.pulse ? "animate-pulse-dot" : ""}`}
+                                style={{ marginRight: 0 }}
                               />
-                            ) : null}
-                            <MobileField
-                              label="提示"
-                              stacked
-                              value={hintMessage}
-                            />
-                            <div className="mobile-card-actions">
-                              <button
-                                onClick={() => handleTogglePin(a)}
-                                disabled={!!actionLoading[`pin-toggle-${a.id}`]}
-                                className={`btn btn-link ${a.isPinned ? "btn-link-warning" : "btn-link-primary"}`}
-                              >
-                                {actionLoading[`pin-toggle-${a.id}`] ? (
-                                  <span className="spinner spinner-sm" />
-                                ) : a.isPinned ? (
-                                  "取消置顶"
-                                ) : (
-                                  "置顶"
-                                )}
-                              </button>
-                              {sortMode === "custom" && (
-                                <>
-                                  <button
-                                    onClick={() =>
-                                      handleMoveCustomOrder(a, "up")
-                                    }
-                                    disabled={
-                                      !!actionLoading[`reorder-${a.id}`]
-                                    }
-                                    className="btn btn-link btn-link-muted"
-                                  >
-                                    ↑ 上移
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      handleMoveCustomOrder(a, "down")
-                                    }
-                                    disabled={
-                                      !!actionLoading[`reorder-${a.id}`]
-                                    }
-                                    className="btn btn-link btn-link-muted"
-                                  >
-                                    ↓ 下移
-                                  </button>
-                                </>
-                              )}
-                              {capabilities.canRefreshBalance && (
-                                <button
-                                  onClick={() =>
-                                    withLoading(
-                                      `refresh-${a.id}`,
-                                      () => api.refreshBalance(a.id),
-                                      "余额已刷新",
-                                    )
-                                  }
-                                  disabled={actionLoading[`refresh-${a.id}`]}
-                                  className="btn btn-link btn-link-primary"
-                                >
-                                  {actionLoading[`refresh-${a.id}`] ? (
-                                    <span className="spinner spinner-sm" />
-                                  ) : (
-                                    "刷新"
-                                  )}
-                                </button>
-                              )}
-                              {capabilities.canCheckin && (
-                                <button
-                                  onClick={() =>
-                                    withLoading(
-                                      `checkin-${a.id}`,
-                                      () => api.triggerCheckin(a.id),
-                                      "签到完成",
-                                    )
-                                  }
-                                  disabled={actionLoading[`checkin-${a.id}`]}
-                                  className="btn btn-link btn-link-warning"
-                                >
-                                  {actionLoading[`checkin-${a.id}`] ? (
-                                    <span className="spinner spinner-sm" />
-                                  ) : (
-                                    "签到"
-                                  )}
-                                </button>
-                              )}
-                              {a.status === "expired" &&
-                                !capabilities.proxyOnly && (
-                                  <button
-                                    onClick={() => openRebindPanel(a)}
-                                    className="btn btn-link btn-link-warning"
-                                  >
-                                    重新绑定
-                                  </button>
-                                )}
-                              <button
-                                onClick={() =>
-                                  setDeleteConfirm({
-                                    mode: "single",
-                                    accountId: a.id,
-                                    accountName: resolveAccountDisplayName(a),
-                                  })
-                                }
-                                disabled={actionLoading[`delete-${a.id}`]}
-                                className="btn btn-link btn-link-danger"
-                              >
-                                {actionLoading[`delete-${a.id}`] ? (
-                                  <span className="spinner spinner-sm" />
-                                ) : (
-                                  "删除"
-                                )}
-                              </button>
-                            </div>
+                              {health.label}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "var(--color-text-muted)",
+                                maxWidth: 240,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                              data-tooltip={health.reason}
+                            >
+                              {health.reason}
+                            </span>
                           </div>
-                        ) : null}
-                      </MobileCard>
-                    );
-                  })}
-                </div>
-              ) : (
-                <table className="data-table accounts-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 44 }}>
-                        <input
-                          type="checkbox"
-                          checked={allDisplayedAccountsSelected}
-                          onChange={(e) =>
-                            toggleSelectAllVisibleAccounts(e.target.checked)
-                          }
-                        />
-                      </th>
-                      {activeSegment === "apikey" ? (
-                        <>
-                          <th style={{ width: "11%" }}>站点</th>
-                          <th style={{ width: "12%" }}>连接名称</th>
-                          <th style={{ width: "8%" }}>状态</th>
-                        </>
-                      ) : (
-                        <>
-                          <th style={{ width: "12%" }}>连接名称</th>
-                          <th>站点</th>
-                        </>
-                      )}
-                      <th>运行健康状态</th>
-                      <th style={{ width: "22%" }}>启用模型</th>
-                      <th>余额</th>
-                      <th>已用</th>
-                      <th style={{ width: 72 }}>签到</th>
-                      <th
-                        className="accounts-actions-col"
-                        style={{ textAlign: "right" }}
-                      >
-                        操作
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayedAccounts.map((a: any, i: number) => {
-                      const capabilities = resolveAccountCapabilities(a);
-                      const connectionMode = resolveAccountCredentialMode(a);
-                      return (
-                        <tr
-                          key={a.id}
-                          data-testid={`account-row-${a.id}`}
-                          ref={(node) => {
-                            if (node) rowRefs.current.set(a.id, node);
-                            else rowRefs.current.delete(a.id);
-                          }}
-                          onClick={(event) =>
-                            handleAccountRowClick(a.id, event)
-                          }
-                          className={`animate-slide-up stagger-${Math.min(i + 1, 5)} row-selectable ${selectedAccountIds.includes(a.id) ? "row-selected" : ""} ${highlightAccountId === a.id ? "row-focus-highlight" : ""}`.trim()}
-                        >
-                          <td>
-                            <input
-                              data-testid={`account-select-${a.id}`}
-                              type="checkbox"
-                              checked={selectedAccountIds.includes(a.id)}
-                              onChange={(e) =>
-                                toggleAccountSelection(a.id, e.target.checked)
-                              }
-                            />
-                          </td>
-                          {activeSegment === "apikey" ? (
-                            <>
-                              <td>
-                                <SiteBadgeLink
-                                  siteId={a.site?.id}
-                                  siteName={a.site?.name}
-                                  badgeClassName="badge accounts-site-highlight"
-                                />
-                              </td>
-                              <td style={{ color: "var(--color-text-primary)" }}>
-                                <div
-                                  style={{
-                                    fontWeight: 600,
-                                    whiteSpace: "nowrap",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                  }}
-                                  data-tooltip={resolveAccountDisplayName(a)}
-                                >
-                                  {resolveAccountDisplayName(a)}
-                                </div>
-                                <div
-                                  style={{ display: "flex", gap: 4, marginTop: 4 }}
-                                >
-                                  <span
-                                    className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
-                                    style={{ fontSize: 10 }}
-                                  >
-                                    {connectionMode === "apikey"
-                                      ? "API Key"
-                                      : "Session"}
-                                  </span>
-                                  {parseAccountExtraConfig(a)?.proxyUrl && (
-                                    <span
-                                      className="badge badge-purple"
-                                      style={{ fontSize: 10 }}
-                                    >
-                                      代理
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="sites-status-toggle"
-                                  onClick={() => handleToggleAccountStatus(a)}
-                                  disabled={
-                                    !!actionLoading[`status-toggle-${a.id}`]
-                                  }
-                                  data-testid={`account-status-toggle-${a.id}`}
-                                  title={
-                                    a.status === "disabled"
-                                      ? "点击启用"
-                                      : "点击禁用"
-                                  }
-                                  aria-label={
-                                    a.status === "disabled"
-                                      ? "点击启用"
-                                      : "点击禁用"
-                                  }
-                                >
-                                  {actionLoading[`status-toggle-${a.id}`] ? (
-                                    <span className="spinner spinner-sm" />
-                                  ) : (
-                                    <span
-                                      className={`badge ${a.status === "disabled" ? "badge-muted" : "badge-success"}`}
-                                      style={{
-                                        fontSize: 13,
-                                        fontWeight: 700,
-                                        padding: "6px 14px",
-                                        borderRadius: 999,
-                                        minWidth: 56,
-                                        justifyContent: "center",
-                                      }}
-                                    >
-                                      {a.status === "disabled" ? "启用" : "禁用"}
-                                    </span>
-                                  )}
-                                </button>
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td style={{ color: "var(--color-text-primary)" }}>
-                                <div
-                                  style={{
-                                    fontWeight: 600,
-                                    whiteSpace: "nowrap",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                  }}
-                                  data-tooltip={resolveAccountDisplayName(a)}
-                                >
-                                  {resolveAccountDisplayName(a)}
-                                </div>
-                                <div
-                                  style={{ display: "flex", gap: 4, marginTop: 4 }}
-                                >
-                                  <span
-                                    className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
-                                    style={{ fontSize: 10 }}
-                                  >
-                                    {connectionMode === "apikey"
-                                      ? "API Key"
-                                      : "Session"}
-                                  </span>
-                                  {parseAccountExtraConfig(a)?.proxyUrl && (
-                                    <span
-                                      className="badge badge-purple"
-                                      style={{ fontSize: 10 }}
-                                    >
-                                      代理
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td>
-                                <SiteBadgeLink
-                                  siteId={a.site?.id}
-                                  siteName={a.site?.name}
-                                  badgeStyle={{ fontSize: 11 }}
-                                />
-                              </td>
-                            </>
-                          )}
-                          <td>
-                            {(() => {
-                              const health = resolveRuntimeHealth(a);
-                              return (
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: 4,
-                                  }}
-                                >
-                                  <span
-                                    className={`badge ${health.cls}`}
-                                    style={{
-                                      fontSize: 11,
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 4,
-                                      width: "fit-content",
-                                    }}
-                                  >
-                                    <span
-                                      className={`status-dot ${health.dotClass} ${health.pulse ? "animate-pulse-dot" : ""}`}
-                                      style={{ marginRight: 0 }}
-                                    />
-                                    {health.label}
-                                  </span>
-                                  <span
-                                    style={{
-                                      fontSize: 11,
-                                      color: "var(--color-text-muted)",
-                                      maxWidth: 200,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                    data-tooltip={health.reason}
-                                  >
-                                    {health.reason}
-                                  </span>
-                                </div>
-                              );
-                            })()}
-                          </td>
-                          <td>
-                            <EnabledModelsSummary
-                              models={a.enabledModels || []}
-                            />
-                          </td>
-                          <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                        }
+                      />
+                      <MobileField
+                        label="余额"
+                        value={
+                          <div>
                             <div
                               style={{
                                 fontWeight: 600,
@@ -3960,13 +2708,13 @@ export default function Accounts() {
                             >
                               +{(a.todayReward || 0).toFixed(2)}
                             </div>
-                          </td>
-                          <td
-                            style={{
-                              fontVariantNumeric: "tabular-nums",
-                              fontSize: 12,
-                            }}
-                          >
+                          </div>
+                        }
+                      />
+                      <MobileField
+                        label="已用"
+                        value={
+                          <div>
                             <div>${(a.balanceUsed || 0).toFixed(2)}</div>
                             <div
                               style={{
@@ -3980,214 +2728,570 @@ export default function Accounts() {
                             >
                               -{(a.todaySpend || 0).toFixed(2)}
                             </div>
-                          </td>
-                          <td>
-                            {capabilities.canCheckin ? (
-                              <button
-                                type="button"
-                                className={`checkin-toggle-badge ${a.checkinEnabled ? "is-on" : "is-off"}`}
-                                onClick={() => handleToggleCheckin(a)}
-                                disabled={
-                                  !!actionLoading[`checkin-toggle-${a.id}`]
-                                }
-                                data-tooltip={
-                                  a.checkinEnabled
-                                    ? "点击关闭签到，全部签到会忽略此账号"
-                                    : "点击开启签到"
-                                }
-                                aria-label={
-                                  a.checkinEnabled
-                                    ? "点击关闭签到，全部签到会忽略此账号"
-                                    : "点击开启签到"
-                                }
-                              >
-                                {actionLoading[`checkin-toggle-${a.id}`] ? (
-                                  <span className="spinner spinner-sm" />
-                                ) : a.checkinEnabled ? (
-                                  "开启"
-                                ) : (
-                                  "关闭"
-                                )}
-                              </button>
-                            ) : (
-                              <span
-                                className="badge badge-muted"
-                                style={{ fontSize: 11, whiteSpace: "nowrap" }}
-                              >
-                                不支持
-                              </span>
+                          </div>
+                        }
+                      />
+                      <MobileField
+                        label="启用模型"
+                        value={
+                          <EnabledModelsSummary
+                            models={a.enabledModels || []}
+                          />
+                        }
+                        stacked
+                      />
+                      {isExpanded ? (
+                        <div className="mobile-card-extra">
+                          <MobileField
+                            label="站点"
+                            value={
+                              <SiteBadgeLink
+                                siteId={a.site?.id}
+                                siteName={a.site?.name}
+                                badgeStyle={{ fontSize: 11 }}
+                              />
+                            }
+                          />
+                          <MobileField
+                            label="签到"
+                            value={
+                              capabilities.canCheckin ? (
+                                <button
+                                  type="button"
+                                  className={`checkin-toggle-badge ${a.checkinEnabled ? "is-on" : "is-off"}`}
+                                  onClick={() => handleToggleCheckin(a)}
+                                  disabled={
+                                    !!actionLoading[`checkin-toggle-${a.id}`]
+                                  }
+                                  data-tooltip={
+                                    a.checkinEnabled
+                                      ? "点击关闭签到，全部签到会忽略此账号"
+                                      : "点击开启签到"
+                                  }
+                                  aria-label={
+                                    a.checkinEnabled
+                                      ? "点击关闭签到，全部签到会忽略此账号"
+                                      : "点击开启签到"
+                                  }
+                                >
+                                  {actionLoading[`checkin-toggle-${a.id}`] ? (
+                                    <span className="spinner spinner-sm" />
+                                  ) : a.checkinEnabled ? (
+                                    "开启"
+                                  ) : (
+                                    "关闭"
+                                  )}
+                                </button>
+                              ) : (
+                                <span
+                                  className="badge badge-muted"
+                                  style={{ fontSize: 11, whiteSpace: "nowrap" }}
+                                >
+                                  不支持
+                                </span>
+                              )
+                            }
+                          />
+                          <MobileField
+                            label="账号状态"
+                            value={
+                              a.status === "expired"
+                                ? "已过期"
+                                : a.status || "-"
+                            }
+                          />
+                          <MobileField
+                            label="提示"
+                            stacked
+                            value={hintMessage}
+                          />
+                          <div className="mobile-card-actions">
+                            <button
+                              onClick={() => handleTogglePin(a)}
+                              disabled={!!actionLoading[`pin-toggle-${a.id}`]}
+                              className={`btn btn-link ${a.isPinned ? "btn-link-warning" : "btn-link-primary"}`}
+                            >
+                              {actionLoading[`pin-toggle-${a.id}`] ? (
+                                <span className="spinner spinner-sm" />
+                              ) : a.isPinned ? (
+                                "取消置顶"
+                              ) : (
+                                "置顶"
+                              )}
+                            </button>
+                            {sortMode === "custom" && (
+                              <>
+                                <button
+                                  onClick={() => handleMoveCustomOrder(a, "up")}
+                                  disabled={!!actionLoading[`reorder-${a.id}`]}
+                                  className="btn btn-link btn-link-muted"
+                                >
+                                  ↑ 上移
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    handleMoveCustomOrder(a, "down")
+                                  }
+                                  disabled={!!actionLoading[`reorder-${a.id}`]}
+                                  className="btn btn-link btn-link-muted"
+                                >
+                                  ↓ 下移
+                                </button>
+                              </>
                             )}
-                          </td>
-                          <td
-                            className="accounts-actions-cell"
-                            style={{ textAlign: "right" }}
-                          >
-                            <div className="accounts-row-actions">
-                              <button
-                                onClick={() => handleTogglePin(a)}
-                                disabled={!!actionLoading[`pin-toggle-${a.id}`]}
-                                className={`btn btn-link ${a.isPinned ? "btn-link-warning" : "btn-link-primary"}`}
-                              >
-                                {actionLoading[`pin-toggle-${a.id}`] ? (
-                                  <span className="spinner spinner-sm" />
-                                ) : a.isPinned ? (
-                                  "取消置顶"
-                                ) : (
-                                  "置顶"
-                                )}
-                              </button>
-                              {sortMode === "custom" && (
-                                <>
-                                  <button
-                                    onClick={() =>
-                                      handleMoveCustomOrder(a, "up")
-                                    }
-                                    disabled={
-                                      !!actionLoading[`reorder-${a.id}`]
-                                    }
-                                    className="btn btn-link btn-link-muted"
-                                  >
-                                    ↑
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      handleMoveCustomOrder(a, "down")
-                                    }
-                                    disabled={
-                                      !!actionLoading[`reorder-${a.id}`]
-                                    }
-                                    className="btn btn-link btn-link-muted"
-                                  >
-                                    ↓
-                                  </button>
-                                </>
-                              )}
-                              {capabilities.canRefreshBalance && (
-                                <button
-                                  onClick={() =>
-                                    withLoading(
-                                      `refresh-${a.id}`,
-                                      () => api.refreshBalance(a.id),
-                                      "余额已刷新",
-                                    )
-                                  }
-                                  disabled={actionLoading[`refresh-${a.id}`]}
-                                  className="btn btn-link btn-link-primary"
-                                >
-                                  {actionLoading[`refresh-${a.id}`] ? (
-                                    <span className="spinner spinner-sm" />
-                                  ) : (
-                                    "刷新"
-                                  )}
-                                </button>
-                              )}
-                              <button
-                                onClick={() => openModelModal(a)}
-                                disabled={actionLoading[`models-${a.id}`]}
-                                className="btn btn-link btn-link-info"
-                              >
-                                模型
-                              </button>
-                              {capabilities.canCheckin && (
-                                <button
-                                  onClick={() =>
-                                    withLoading(
-                                      `checkin-${a.id}`,
-                                      () => api.triggerCheckin(a.id),
-                                      "签到完成",
-                                    )
-                                  }
-                                  disabled={actionLoading[`checkin-${a.id}`]}
-                                  className="btn btn-link btn-link-warning"
-                                >
-                                  {actionLoading[`checkin-${a.id}`] ? (
-                                    <span className="spinner spinner-sm" />
-                                  ) : (
-                                    "签到"
-                                  )}
-                                </button>
-                              )}
-                              {a.status === "expired" &&
-                                !capabilities.proxyOnly && (
-                                  <button
-                                    onClick={() => openRebindPanel(a)}
-                                    className="btn btn-link btn-link-warning"
-                                  >
-                                    重新绑定
-                                  </button>
-                                )}
-                              <button
-                                onClick={() => openCopyAccountPanel(a)}
-                                className="btn btn-link btn-link-primary"
-                              >
-                                复制
-                              </button>
-                              <button
-                                onClick={() => openEditPanel(a)}
-                                className="btn btn-link btn-link-info"
-                              >
-                                编辑
-                              </button>
+                            {capabilities.canRefreshBalance && (
                               <button
                                 onClick={() =>
-                                  setDeleteConfirm({
-                                    mode: "single",
-                                    accountId: a.id,
-                                    accountName: resolveAccountDisplayName(a),
-                                  })
+                                  withLoading(
+                                    `refresh-${a.id}`,
+                                    () => api.refreshBalance(a.id),
+                                    "余额已刷新",
+                                  )
                                 }
-                                disabled={actionLoading[`delete-${a.id}`]}
-                                className="btn btn-link btn-link-danger"
+                                disabled={actionLoading[`refresh-${a.id}`]}
+                                className="btn btn-link btn-link-primary"
                               >
-                                {actionLoading[`delete-${a.id}`] ? (
+                                {actionLoading[`refresh-${a.id}`] ? (
                                   <span className="spinner spinner-sm" />
                                 ) : (
-                                  "删除"
+                                  "刷新"
                                 )}
                               </button>
+                            )}
+                            {capabilities.canCheckin && (
+                              <button
+                                onClick={() =>
+                                  withLoading(
+                                    `checkin-${a.id}`,
+                                    () => api.triggerCheckin(a.id),
+                                    "签到完成",
+                                  )
+                                }
+                                disabled={actionLoading[`checkin-${a.id}`]}
+                                className="btn btn-link btn-link-warning"
+                              >
+                                {actionLoading[`checkin-${a.id}`] ? (
+                                  <span className="spinner spinner-sm" />
+                                ) : (
+                                  "签到"
+                                )}
+                              </button>
+                            )}
+                            {a.status === "expired" &&
+                              !capabilities.proxyOnly && (
+                                <button
+                                  onClick={() => openRebindPanel(a)}
+                                  className="btn btn-link btn-link-warning"
+                                >
+                                  重新绑定
+                                </button>
+                              )}
+                            <button
+                              onClick={() =>
+                                setDeleteConfirm({
+                                  mode: "single",
+                                  accountId: a.id,
+                                  accountName: resolveAccountDisplayName(a),
+                                })
+                              }
+                              disabled={actionLoading[`delete-${a.id}`]}
+                              className="btn btn-link btn-link-danger"
+                            >
+                              {actionLoading[`delete-${a.id}`] ? (
+                                <span className="spinner spinner-sm" />
+                              ) : (
+                                "删除"
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </MobileCard>
+                  );
+                })}
+              </div>
+            ) : (
+              <table className="data-table accounts-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 44 }}>
+                      <input
+                        type="checkbox"
+                        checked={allDisplayedAccountsSelected}
+                        onChange={(e) =>
+                          toggleSelectAllVisibleAccounts(e.target.checked)
+                        }
+                      />
+                    </th>
+                    <th style={{ width: "12%" }}>连接名称</th>
+                    <th>站点</th>
+                    <th>运行健康状态</th>
+                    <th style={{ width: "22%" }}>启用模型</th>
+                    <th>余额</th>
+                    <th>已用</th>
+                    <th style={{ width: 72 }}>签到</th>
+                    <th
+                      className="accounts-actions-col"
+                      style={{ textAlign: "right" }}
+                    >
+                      操作
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedAccounts.map((a: any, i: number) => {
+                    const capabilities = resolveAccountCapabilities(a);
+                    const connectionMode = resolveAccountCredentialMode(a);
+                    return (
+                      <tr
+                        key={a.id}
+                        data-testid={`account-row-${a.id}`}
+                        ref={(node) => {
+                          if (node) rowRefs.current.set(a.id, node);
+                          else rowRefs.current.delete(a.id);
+                        }}
+                        onClick={(event) => handleAccountRowClick(a.id, event)}
+                        className={`animate-slide-up stagger-${Math.min(i + 1, 5)} row-selectable ${selectedAccountIds.includes(a.id) ? "row-selected" : ""} ${highlightAccountId === a.id ? "row-focus-highlight" : ""}`.trim()}
+                      >
+                        <td>
+                          <input
+                            data-testid={`account-select-${a.id}`}
+                            type="checkbox"
+                            checked={selectedAccountIds.includes(a.id)}
+                            onChange={(e) =>
+                              toggleAccountSelection(a.id, e.target.checked)
+                            }
+                          />
+                        </td>
+                        <>
+                          <td style={{ color: "var(--color-text-primary)" }}>
+                            <div
+                              style={{
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                              data-tooltip={resolveAccountDisplayName(a)}
+                            >
+                              {resolveAccountDisplayName(a)}
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 4,
+                                marginTop: 4,
+                              }}
+                            >
+                              <span
+                                className={`badge ${connectionMode === "apikey" ? "badge-warning" : "badge-info"}`}
+                                style={{ fontSize: 10 }}
+                              >
+                                {connectionMode === "apikey"
+                                  ? "API Key"
+                                  : "Session"}
+                              </span>
+                              {parseAccountExtraConfig(a)?.proxyUrl && (
+                                <span
+                                  className="badge badge-purple"
+                                  style={{ fontSize: 10 }}
+                                >
+                                  代理
+                                </span>
+                              )}
                             </div>
                           </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )
-            ) : (
-              <div className="empty-state">
-                <svg
-                  className="empty-state-icon"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1}
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-                <div className="empty-state-title">
-                  {activeSegment === "apikey"
-                    ? "暂无 API Key 连接"
-                    : "暂无 Session 连接"}
-                </div>
-                <div className="empty-state-desc">
-                  {activeSegment === "apikey"
-                    ? sites.length > 0
-                      ? "请为现有站点补充 API Key 连接"
-                      : "请先添加站点，然后为站点补充 API Key 连接"
-                    : sites.length > 0
-                      ? "请为现有站点添加 Session 连接"
-                      : "请先添加站点，然后添加 Session 连接"}
-                </div>
+                          <td>
+                            <SiteBadgeLink
+                              siteId={a.site?.id}
+                              siteName={a.site?.name}
+                              badgeStyle={{ fontSize: 11 }}
+                            />
+                          </td>
+                        </>
+                        <td>
+                          {(() => {
+                            const health = resolveRuntimeHealth(a);
+                            return (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 4,
+                                }}
+                              >
+                                <span
+                                  className={`badge ${health.cls}`}
+                                  style={{
+                                    fontSize: 11,
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    width: "fit-content",
+                                  }}
+                                >
+                                  <span
+                                    className={`status-dot ${health.dotClass} ${health.pulse ? "animate-pulse-dot" : ""}`}
+                                    style={{ marginRight: 0 }}
+                                  />
+                                  {health.label}
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    color: "var(--color-text-muted)",
+                                    maxWidth: 200,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  data-tooltip={health.reason}
+                                >
+                                  {health.reason}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td>
+                          <EnabledModelsSummary
+                            models={a.enabledModels || []}
+                          />
+                        </td>
+                        <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: "var(--color-text-primary)",
+                            }}
+                          >
+                            ${(a.balance || 0).toFixed(2)}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color:
+                                (a.todayReward || 0) > 0
+                                  ? "var(--color-success)"
+                                  : "var(--color-text-muted)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            +{(a.todayReward || 0).toFixed(2)}
+                          </div>
+                        </td>
+                        <td
+                          style={{
+                            fontVariantNumeric: "tabular-nums",
+                            fontSize: 12,
+                          }}
+                        >
+                          <div>${(a.balanceUsed || 0).toFixed(2)}</div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color:
+                                (a.todaySpend || 0) > 0
+                                  ? "var(--color-danger)"
+                                  : "var(--color-text-muted)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            -{(a.todaySpend || 0).toFixed(2)}
+                          </div>
+                        </td>
+                        <td>
+                          {capabilities.canCheckin ? (
+                            <button
+                              type="button"
+                              className={`checkin-toggle-badge ${a.checkinEnabled ? "is-on" : "is-off"}`}
+                              onClick={() => handleToggleCheckin(a)}
+                              disabled={
+                                !!actionLoading[`checkin-toggle-${a.id}`]
+                              }
+                              data-tooltip={
+                                a.checkinEnabled
+                                  ? "点击关闭签到，全部签到会忽略此账号"
+                                  : "点击开启签到"
+                              }
+                              aria-label={
+                                a.checkinEnabled
+                                  ? "点击关闭签到，全部签到会忽略此账号"
+                                  : "点击开启签到"
+                              }
+                            >
+                              {actionLoading[`checkin-toggle-${a.id}`] ? (
+                                <span className="spinner spinner-sm" />
+                              ) : a.checkinEnabled ? (
+                                "开启"
+                              ) : (
+                                "关闭"
+                              )}
+                            </button>
+                          ) : (
+                            <span
+                              className="badge badge-muted"
+                              style={{ fontSize: 11, whiteSpace: "nowrap" }}
+                            >
+                              不支持
+                            </span>
+                          )}
+                        </td>
+                        <td
+                          className="accounts-actions-cell"
+                          style={{ textAlign: "right" }}
+                        >
+                          <div className="accounts-row-actions">
+                            <button
+                              onClick={() => handleTogglePin(a)}
+                              disabled={!!actionLoading[`pin-toggle-${a.id}`]}
+                              className={`btn btn-link ${a.isPinned ? "btn-link-warning" : "btn-link-primary"}`}
+                            >
+                              {actionLoading[`pin-toggle-${a.id}`] ? (
+                                <span className="spinner spinner-sm" />
+                              ) : a.isPinned ? (
+                                "取消置顶"
+                              ) : (
+                                "置顶"
+                              )}
+                            </button>
+                            {sortMode === "custom" && (
+                              <>
+                                <button
+                                  onClick={() => handleMoveCustomOrder(a, "up")}
+                                  disabled={!!actionLoading[`reorder-${a.id}`]}
+                                  className="btn btn-link btn-link-muted"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    handleMoveCustomOrder(a, "down")
+                                  }
+                                  disabled={!!actionLoading[`reorder-${a.id}`]}
+                                  className="btn btn-link btn-link-muted"
+                                >
+                                  ↓
+                                </button>
+                              </>
+                            )}
+                            {capabilities.canRefreshBalance && (
+                              <button
+                                onClick={() =>
+                                  withLoading(
+                                    `refresh-${a.id}`,
+                                    () => api.refreshBalance(a.id),
+                                    "余额已刷新",
+                                  )
+                                }
+                                disabled={actionLoading[`refresh-${a.id}`]}
+                                className="btn btn-link btn-link-primary"
+                              >
+                                {actionLoading[`refresh-${a.id}`] ? (
+                                  <span className="spinner spinner-sm" />
+                                ) : (
+                                  "刷新"
+                                )}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => openModelModal(a)}
+                              disabled={actionLoading[`models-${a.id}`]}
+                              className="btn btn-link btn-link-info"
+                            >
+                              模型
+                            </button>
+                            {capabilities.canCheckin && (
+                              <button
+                                onClick={() =>
+                                  withLoading(
+                                    `checkin-${a.id}`,
+                                    () => api.triggerCheckin(a.id),
+                                    "签到完成",
+                                  )
+                                }
+                                disabled={actionLoading[`checkin-${a.id}`]}
+                                className="btn btn-link btn-link-warning"
+                              >
+                                {actionLoading[`checkin-${a.id}`] ? (
+                                  <span className="spinner spinner-sm" />
+                                ) : (
+                                  "签到"
+                                )}
+                              </button>
+                            )}
+                            {a.status === "expired" &&
+                              !capabilities.proxyOnly && (
+                                <button
+                                  onClick={() => openRebindPanel(a)}
+                                  className="btn btn-link btn-link-warning"
+                                >
+                                  重新绑定
+                                </button>
+                              )}
+                            <button
+                              onClick={() => openCopyAccountPanel(a)}
+                              className="btn btn-link btn-link-primary"
+                            >
+                              复制
+                            </button>
+                            <button
+                              onClick={() => openEditPanel(a)}
+                              className="btn btn-link btn-link-info"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              onClick={() =>
+                                setDeleteConfirm({
+                                  mode: "single",
+                                  accountId: a.id,
+                                  accountName: resolveAccountDisplayName(a),
+                                })
+                              }
+                              disabled={actionLoading[`delete-${a.id}`]}
+                              className="btn btn-link btn-link-danger"
+                            >
+                              {actionLoading[`delete-${a.id}`] ? (
+                                <span className="spinner spinner-sm" />
+                              ) : (
+                                "删除"
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )
+          ) : (
+            <div className="empty-state">
+              <svg
+                className="empty-state-icon"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1}
+                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+              <div className="empty-state-title">暂无 Session 连接</div>
+              <div className="empty-state-desc">
+                {sites.length > 0
+                  ? "请为现有站点添加 Session 连接"
+                  : "请先添加站点，然后添加 Session 连接"}
               </div>
-            )}
-            {connectionPagination}
-          </div>
-        </>
-      )}
+            </div>
+          )}
+          {connectionPagination}
+        </div>
+      </>
 
       <AccountModelsModal
         modelModal={modelModal}

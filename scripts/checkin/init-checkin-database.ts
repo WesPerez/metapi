@@ -42,7 +42,14 @@ function main(): void {
         table,
         Number((db.prepare('SELECT count(*) AS count FROM ' + JSON.stringify(table)).get() as { count: number }).count),
       ]));
-      console.log(JSON.stringify({ status: 'validated', db: dbPath, tables, counts, integrity: 'ok' }, null, 2));
+      console.log(JSON.stringify({
+        status: 'validated',
+        db: dbPath,
+        tables,
+        counts,
+        schemaVersion: Number(db.pragma('user_version', { simple: true })),
+        integrity: 'ok',
+      }, null, 2));
       return;
     } finally {
       db.close();

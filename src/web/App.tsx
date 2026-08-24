@@ -1,13 +1,9 @@
 ﻿import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import { ToastProvider, useToast } from './components/Toast.js';
-import SearchModal from './components/SearchModal.js';
-import NotificationPanel from './components/NotificationPanel.js';
 import TooltipLayer from './components/TooltipLayer.js';
-import { api } from './api.js';
 import { clearAuthSession, hasValidAuthSession, persistAuthSession } from './authSession.js';
 import {
-  FIRST_USE_DOC_REMINDER_KEY,
   LEGACY_THEME_STORAGE_KEY,
   THEME_MODE_STORAGE_KEY,
   USER_PROFILE_STORAGE_KEY,
@@ -20,28 +16,8 @@ import { useIsMobile } from './components/useIsMobile.js';
 import { MobileDrawer } from './components/MobileDrawer.js';
 import CenteredModal from './components/CenteredModal.js';
 
-// The check-in build keeps the existing auth/session implementation while
-// exposing only the account and operational settings surfaces.
-const CHECKIN_MODE = import.meta.env.VITE_CHECKIN_MODE === 'true';
-
-const Dashboard = lazy(() => import('./pages/Dashboard.js'));
-const Sites = lazy(() => import('./pages/Sites.js'));
 const Accounts = lazy(() => import('./pages/Accounts.js'));
-const Tokens = lazy(() => import('./pages/Tokens.js'));
-const CheckinLog = lazy(() => import('./pages/CheckinLog.js'));
-const TokenRoutes = lazy(() => import('./pages/TokenRoutes.js'));
-const ProxyLogs = lazy(() => import('./pages/ProxyLogs.js'));
 const Settings = lazy(() => import('./pages/Settings.js'));
-const DownstreamKeys = lazy(() => import('./pages/DownstreamKeys.js'));
-const ImportExport = lazy(() => import('./pages/ImportExport.js'));
-const NotificationSettings = lazy(() => import('./pages/NotificationSettings.js'));
-const ProgramLogs = lazy(() => import('./pages/ProgramLogs.js'));
-const Models = lazy(() => import('./pages/Models.js'));
-const About = lazy(() => import('./pages/About.js'));
-const ModelTester = lazy(() => import('./pages/ModelTester.js'));
-const Monitors = lazy(() => import('./pages/Monitors.js'));
-const OAuthManagement = lazy(() => import('./pages/OAuthManagement.js'));
-const SiteAnnouncements = lazy(() => import('./pages/SiteAnnouncements.js'));
 
 type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -139,16 +115,16 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
   const [error, setError] = useState('');
   const capabilityRows = [
     {
-      title: t('统一代理网关'),
-      description: t('一个 Key、一个入口，兼容 OpenAI / Claude 下游格式'),
+      title: t('账号签到管理'),
+      description: t('集中维护站点账号，自动执行每日签到'),
     },
     {
-      title: t('自动模型发现'),
-      description: t('上游新增模型自动出现在模型列表，零配置路由生成'),
+      title: t('定时任务'),
+      description: t('支持 Cron 与固定间隔两种签到调度模式'),
     },
     {
-      title: t('智能路由引擎'),
-      description: t('按成本、延迟、成功率自动选择最优通道，故障自动转移'),
+      title: t('系统代理'),
+      description: t('为站点请求配置统一代理并随时测试连通性'),
     },
   ];
 
@@ -203,10 +179,10 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
           </div>
           <div className="login-brand-copy-block">
             <p className="login-brand-copy">
-              {t('把分散的 New API / One API / OneHub 等站点聚合成统一网关，自动发现模型、智能路由、成本更优。')}
+              {t('为站点账号签到而生的独立管理入口，保留账号、密码登录与必要运维设置。')}
             </p>
           </div>
-          <div className="login-compat-line">{t('兼容 New API / One API / OneHub / DoneHub / Veloera / AnyRouter / Sub2API')}</div>
+          <div className="login-compat-line">{t('账号刷新 · 模型获取 · 定时签到')}</div>
           <div className="login-capability-list">
             {capabilityRows.map((feature, index) => (
               <div key={feature.title} className="login-capability-row">
@@ -247,14 +223,14 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
 
         <section className="login-auth-stage">
           <div className="login-auth-panel">
-            <div className="login-auth-eyebrow">{t(CHECKIN_MODE ? '签到管理入口' : '管理员入口')}</div>
+            <div className="login-auth-eyebrow">{t('签到管理入口')}</div>
             <h2 className="login-auth-title">{t('登录')}</h2>
-            <p className="login-auth-copy">{t(CHECKIN_MODE ? '请输入管理密码后继续。' : '请输入管理员令牌后继续。')}</p>
-            <label className="login-auth-label" htmlFor="admin-token-input">{t(CHECKIN_MODE ? '管理密码' : '管理员令牌')}</label>
+            <p className="login-auth-copy">{t('请输入管理密码后继续。')}</p>
+            <label className="login-auth-label" htmlFor="admin-token-input">{t('管理密码')}</label>
             <input
               id="admin-token-input"
               type="password"
-              placeholder={t(CHECKIN_MODE ? '管理密码' : '管理员令牌')}
+              placeholder={t('管理密码')}
               value={token}
               onChange={(e) => {
                 setToken(e.target.value);
@@ -275,9 +251,9 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
             >
               {loading ? <><span className="spinner spinner-sm" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} />{t('验证中...')}</> : t('登录')}
             </button>
-            <div className="login-auth-note">{t(CHECKIN_MODE ? '仅校验本地服务访问权限，不会把密码发送到第三方。' : '仅校验本地服务访问权限，不会把令牌发送到第三方。')}</div>
+            <div className="login-auth-note">{t('仅校验本地服务访问权限，不会把密码发送到第三方。')}</div>
             <div className="login-auth-footer">
-              <span>{t(CHECKIN_MODE ? '登录后管理签到账号。' : '管理员登录后继续。')}</span>
+              <span>{t('登录后管理签到账号。')}</span>
             </div>
           </div>
         </section>
@@ -410,48 +386,16 @@ function UserProfileModal({
 
 export const sidebarGroups = [
   {
-    label: '控制台',
+    label: '签到管理',
     items: [
-      { to: '/', label: '仪表盘', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 12a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1v-7z" /></svg> },
-      { to: '/sites', label: '站点管理', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg> },
-      { to: '/accounts?segment=apikey', label: 'API Key管理', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg> },
-      { to: '/site-announcements', label: '站点公告', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 8h10M7 12h10M7 16h6M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" /></svg> },
-      { to: '/accounts', label: '连接管理', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
-      { to: '/oauth', label: 'OAuth 管理', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 7a3 3 0 106 0 3 3 0 00-6 0zM3 17a3 3 0 106 0 3 3 0 00-6 0zM15 17a3 3 0 106 0 3 3 0 00-6 0zM6 14V10m0 0a3 3 0 113-3m-3 3a3 3 0 003 3h6" /></svg> },
-      { to: '/downstream-keys', label: '下游密钥', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 7a4 4 0 11-8 0 4 4 0 018 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 21a6 6 0 0110.8-3.6M15.5 18.5l2-2m0 0l2 2m-2-2V21" /></svg> },
-      { to: '/checkin', label: '签到记录', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
-      { to: '/routes', label: '路由', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg> },
-      { to: '/logs', label: '使用日志', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> },
-      { to: '/monitor', label: '可用性监控', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 5a2 2 0 012-2h14a2 2 0 012 2v11a2 2 0 01-2 2h-5l-2.5 3-2.5-3H5a2 2 0 01-2-2V5z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 10h3l1.5-2.5L14 13l1.5-3H17" /></svg> },
-    ],
-  },
-  {
-    label: '系统',
-    items: [
+      { to: '/accounts?segment=session', label: '连接管理', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
       { to: '/settings', label: '设置', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
-      { to: '/events', label: '程序日志', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg> },
-      { to: '/settings/import-export', label: '导入/导出', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 7h10M7 12h6m-6 5h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" /></svg> },
-      { to: '/settings/notify', label: '通知设置', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg> },
     ],
   },
 ];
 
-const topNavItems = [
-  { label: '控制台', to: '/' },
-  { label: '模型广场', to: '/models' },
-  { label: '模型操练场', to: '/playground' },
-  { label: '关于', to: '/about' },
-];
+const activeSidebarGroups = sidebarGroups;
 
-const activeSidebarGroups = CHECKIN_MODE
-  ? sidebarGroups
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => item.to === '/accounts' || item.to === '/settings'),
-    }))
-    .filter((group) => group.items.length > 0)
-  : sidebarGroups;
-const activeTopNavItems = CHECKIN_MODE ? [] : topNavItems;
 
 function PageTransition({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -479,14 +423,9 @@ function AppShell() {
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [userProfile, setUserProfile] = useState<UserProfile>(() => resolveStoredProfile());
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const themeMenuPresence = useAnimatedVisibility(showThemeMenu, 160);
   const userMenuPresence = useAnimatedVisibility(showUserMenu, 160);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const notifBtnRef = useRef<HTMLButtonElement>(null);
-  const latestTaskEventIdRef = useRef(0);
   const toast = useToast();
   const isMobile = useIsMobile();
   const resolvedTheme: 'light' | 'dark' = themeMode === 'system'
@@ -532,73 +471,6 @@ function AppShell() {
   }, [drawerOpen, isMobile]);
 
   useEffect(() => {
-    if (CHECKIN_MODE) return;
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setShowSearch(true);
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  useEffect(() => {
-    if (!authed || CHECKIN_MODE) return;
-    let cancelled = false;
-
-    const pollEvents = async () => {
-      try {
-        const recentEvents = await api.getEvents('limit=30');
-
-        if (cancelled) return;
-        const rows = Array.isArray(recentEvents) ? recentEvents : [];
-        const unread = rows.filter((r: any) => !r.read).length;
-        setUnreadCount(unread);
-        const maxId = rows.reduce((acc: number, row: any) => Math.max(acc, Number(row?.id) || 0), 0);
-
-        if (latestTaskEventIdRef.current === 0) {
-          latestTaskEventIdRef.current = maxId;
-          return;
-        }
-
-        const newTaskEvents = rows
-          .filter((row: any) => (
-            (Number(row?.id) || 0) > latestTaskEventIdRef.current
-            && row?.relatedType === 'task'
-            && !String(row?.title || '').includes('已开始')
-          ))
-          .sort((a: any, b: any) => (a.id || 0) - (b.id || 0))
-          .slice(-3);
-
-        for (const event of newTaskEvents) {
-          const message = event?.message || event?.title || t('任务状态已更新');
-          if (event?.level === 'error') {
-            toast.error(message);
-          } else if (event?.level === 'warning') {
-            toast.info(message);
-          } else {
-            toast.success(message);
-          }
-        }
-
-        if (maxId > latestTaskEventIdRef.current) {
-          latestTaskEventIdRef.current = maxId;
-        }
-      } catch {
-        // ignore polling errors
-      }
-    };
-
-    void pollEvents();
-    const timer = setInterval(() => { void pollEvents(); }, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [authed, toast]);
-
-  useEffect(() => {
     if (!authed) return;
 
     const check = () => {
@@ -611,13 +483,6 @@ function AppShell() {
     const timer = setInterval(check, 60_000);
     return () => clearInterval(timer);
   }, [authed, toast]);
-
-  useEffect(() => {
-    if (!authed || CHECKIN_MODE) return;
-    if (localStorage.getItem(FIRST_USE_DOC_REMINDER_KEY)) return;
-    localStorage.setItem(FIRST_USE_DOC_REMINDER_KEY, '1');
-    toast.info(`${t('首次使用建议先阅读站点文档：')}${SITE_DOCS_URL}`);
-  }, [authed, t, toast]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -678,13 +543,7 @@ function AppShell() {
           <img src="/logo.png" alt="Metapi" style={{ width: 28, height: 28, borderRadius: 6 }} />
           <span className="topbar-logo-text">Metapi</span>
         </div>
-        <nav className="topbar-nav">
-          {activeTopNavItems.map((item) => (
-            <NavLink key={item.to} to={item.to} end className={({ isActive }) => `topbar-nav-item ${isActive ? 'active' : ''}`}>
-              {t(item.label)}
-            </NavLink>
-          ))}
-        </nav>
+        <nav className="topbar-nav" />
         <div className="topbar-right">
           <button
             className="topbar-icon-btn"
@@ -694,22 +553,6 @@ function AppShell() {
           >
             {language === 'zh' ? 'EN' : '中'}
           </button>
-          {!CHECKIN_MODE && <button className="topbar-search-trigger" aria-label={t('搜索 (Ctrl+K)')} onClick={() => setShowSearch(true)}>
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            <span className="topbar-search-label">{t('搜索')}</span>
-            <kbd className="topbar-search-kbd">Ctrl K</kbd>
-          </button>}
-          {!CHECKIN_MODE && <div style={{ position: 'relative' }}>
-            <button ref={notifBtnRef} className="topbar-icon-btn" aria-label={t('通知')} onClick={() => setShowNotifications(!showNotifications)}>
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-              {unreadCount > 0 && (
-                <span className="topbar-badge">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
-            <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} anchorRef={notifBtnRef} onUnreadCountChange={setUnreadCount} />
-          </div>}
           <div ref={themeMenuRef} style={{ position: 'relative' }}>
             <button
               className="topbar-icon-btn"
@@ -828,19 +671,6 @@ function AppShell() {
                   ))}
                 </div>
               ))}
-              <div className="mobile-nav-group">
-                <div className="mobile-nav-label">{t('更多')}</div>
-                {activeTopNavItems.filter((n) => n.to !== '/').map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}
-                    onClick={() => setDrawerOpen(false)}
-                  >
-                    <span>{t(item.label)}</span>
-                  </NavLink>
-                ))}
-              </div>
             </nav>
           </MobileDrawer>
         ) : (
@@ -876,35 +706,9 @@ function AppShell() {
           <PageTransition>
             <Suspense fallback={<RouteLoadingFallback />}>
               <Routes>
-                {CHECKIN_MODE ? (
-                  <>
-                    <Route path="/accounts" element={<Accounts />} />
-                    <Route path="/settings" element={<Settings />} />
-                    <Route path="*" element={<Navigate to="/accounts?segment=session" replace />} />
-                  </>
-                ) : (
-                  <>
-                    <Route path="/" element={<Dashboard adminName={displayName} />} />
-                    <Route path="/sites" element={<Sites />} />
-                    <Route path="/site-announcements" element={<SiteAnnouncements />} />
-                    <Route path="/accounts" element={<Accounts />} />
-                    <Route path="/oauth" element={<OAuthManagement />} />
-                    <Route path="/tokens" element={<Tokens />} />
-                    <Route path="/checkin" element={<CheckinLog />} />
-                    <Route path="/routes" element={<TokenRoutes />} />
-                    <Route path="/logs" element={<ProxyLogs />} />
-                    <Route path="/monitor" element={<Monitors />} />
-                    <Route path="/settings" element={<Settings />} />
-                    <Route path="/downstream-keys" element={<DownstreamKeys />} />
-                    <Route path="/events" element={<ProgramLogs />} />
-                    <Route path="/settings/import-export" element={<ImportExport />} />
-                    <Route path="/settings/notify" element={<NotificationSettings />} />
-                    <Route path="/models" element={<Models />} />
-                    <Route path="/playground" element={<ModelTester />} />
-                    <Route path="/about" element={<About />} />
-                    <Route path="*" element={<Navigate to="/" />} />
-                  </>
-                )}
+                <Route path="/accounts" element={<Accounts />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/accounts?segment=session" replace />} />
               </Routes>
             </Suspense>
           </PageTransition>
@@ -918,7 +722,6 @@ function AppShell() {
         onSave={handleSaveProfile}
         t={t}
       />
-      {!CHECKIN_MODE && <SearchModal open={showSearch} onClose={() => setShowSearch(false)} />}
     </>
   );
 }

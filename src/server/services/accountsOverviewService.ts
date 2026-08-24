@@ -41,11 +41,17 @@ export type AccountsSnapshotPayload = {
 };
 
 const ACCOUNTS_SNAPSHOT_TTL_MS = 15_000;
-const accountsSnapshotPersistence =
-  createAdminSnapshotPersistence<AccountsSnapshotPayload>({
+function isCheckinAppMode(): boolean {
+  return process.env.CHECKIN_APP_MODE === "true";
+}
+
+function getAccountsSnapshotPersistence() {
+  if (isCheckinAppMode()) return undefined;
+  return createAdminSnapshotPersistence<AccountsSnapshotPayload>({
     namespace: "accounts-snapshot",
     key: "all",
   });
+}
 
 function hasSessionTokenValue(value: string | null | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
@@ -120,20 +126,22 @@ async function loadAccountsSnapshotPayload(): Promise<AccountsSnapshotPayload> {
     todayCheckins,
     enabledModelsByAccount,
   ] = await Promise.all([
-    db
-      .select({
-        accountId: schema.proxyLogs.accountId,
-        totalSpend: sql<number>`coalesce(sum(${schema.proxyLogs.estimatedCost}), 0)`,
-      })
-      .from(schema.proxyLogs)
-      .where(
-        and(
-          gte(schema.proxyLogs.createdAt, startUtc),
-          lt(schema.proxyLogs.createdAt, endUtc),
-        ),
-      )
-      .groupBy(schema.proxyLogs.accountId)
-      .all(),
+    isCheckinAppMode()
+      ? []
+      : await db
+          .select({
+            accountId: schema.proxyLogs.accountId,
+            totalSpend: sql<number>`coalesce(sum(${schema.proxyLogs.estimatedCost}), 0)`,
+          })
+          .from(schema.proxyLogs)
+          .where(
+            and(
+              gte(schema.proxyLogs.createdAt, startUtc),
+              lt(schema.proxyLogs.createdAt, endUtc),
+            ),
+          )
+          .groupBy(schema.proxyLogs.accountId)
+          .all(),
     db
       .select({
         accountId: schema.modelAvailability.accountId,
@@ -234,7 +242,7 @@ export async function getAccountsSnapshot(options?: {
     key: "all",
     ttlMs: ACCOUNTS_SNAPSHOT_TTL_MS,
     forceRefresh: options?.forceRefresh,
-    persistence: accountsSnapshotPersistence,
+    persistence: getAccountsSnapshotPersistence(),
     loader: loadAccountsSnapshotPayload,
   });
 }

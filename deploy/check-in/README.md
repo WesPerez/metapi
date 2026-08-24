@@ -1,7 +1,7 @@
 # Check-in deployment
 
 This compose file runs the `check-in` branch as an isolated service.
-The build sets `VITE_CHECKIN_MODE=true`, so the UI exposes only account management and the password, schedule, and system-proxy settings. The runtime sets `CHECKIN_APP_MODE=true`, which keeps the check-in scheduler active while disabling balance refresh, daily summary, log cleanup, polling, OAuth callback, backup, proxy-retention background jobs, and canonical full-app SQLite migrations. Initialize a fresh data directory with `scripts/checkin/init-checkin-database.ts`; migrate an older full database by copying it and running `scripts/checkin/prune-checkin-database.ts --apply` while the service is stopped.
+The build sets `VITE_CHECKIN_MODE=true`, so the UI exposes only account management and the password, schedule, and system-proxy settings. The runtime sets `CHECKIN_APP_MODE=true`, which keeps the check-in scheduler active while disabling balance refresh, daily summary, log cleanup, polling, OAuth callback, backup, proxy-retention background jobs, and canonical full-app SQLite migrations. A fresh data directory may start empty; the service bootstraps the standalone check-in schema automatically. Migrate an older full database by copying it and running `scripts/checkin/prune-checkin-database.ts --apply` while the service is stopped.
 
 ## Staging
 

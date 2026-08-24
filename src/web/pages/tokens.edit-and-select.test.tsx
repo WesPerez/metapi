@@ -3,7 +3,6 @@ import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { MemoryRouter } from 'react-router-dom';
 import ModernSelect from '../components/ModernSelect.js';
 import { ToastProvider } from '../components/Toast.js';
-import Accounts from './Accounts.js';
 import { TokensPanel } from './Tokens.js';
 import { installAccountsSnapshotCompat } from './testApiCompat.js';
 
@@ -39,26 +38,6 @@ async function flushMicrotasks() {
     await Promise.resolve();
     await Promise.resolve();
   });
-}
-
-function buildRoot() {
-  return create(
-    <MemoryRouter initialEntries={['/accounts?segment=tokens']}>
-      <ToastProvider>
-        <Accounts />
-      </ToastProvider>
-    </MemoryRouter>,
-    {
-      createNodeMock: (element) => {
-        if (element.type === 'tr' || element.type === 'div') {
-          return {
-            scrollIntoView: () => undefined,
-          };
-        }
-        return {};
-      },
-    },
-  );
 }
 
 function buildTokensRoot() {
@@ -150,7 +129,7 @@ describe('Tokens edit modal and row selection', () => {
     let root!: WebTestRenderer;
     try {
       await act(async () => {
-        root = buildRoot();
+        root = buildTokensRoot();
       });
       await flushMicrotasks();
 
@@ -198,7 +177,7 @@ describe('Tokens edit modal and row selection', () => {
     let root!: WebTestRenderer;
     try {
       await act(async () => {
-        root = buildRoot();
+        root = buildTokensRoot();
       });
       await flushMicrotasks();
 
@@ -239,7 +218,7 @@ describe('Tokens edit modal and row selection', () => {
     let root!: WebTestRenderer;
     try {
       await act(async () => {
-        root = buildRoot();
+        root = buildTokensRoot();
       });
       await flushMicrotasks();
 

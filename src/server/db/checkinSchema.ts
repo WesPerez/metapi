@@ -10,8 +10,7 @@
  * - authentication / password settings
  * - sites and site API endpoints (needed to add a site while creating an account)
  * - accounts, account tokens, model availability caches and check-in history
- * - routing tables used by account model refresh
- * - settings and the in-app events feed
+ * - settings for authentication, scheduling and the system proxy
  *
  * Tables that belong to proxy logging, usage aggregation, admin snapshots,
  * OAuth route units, downstream keys, announcements and the Drizzle migration
@@ -19,7 +18,19 @@
  */
 
 export const CHECKIN_SCHEMA_VERSION = 1;
-export const CHECKIN_SCHEMA_VERSION_SETTING_KEY = 'checkin_schema_version';
+
+/**
+ * Business settings retained by the standalone app. Everything else belonged
+ * to retired proxy/router features and is deleted only by an explicit prune
+ * run. Schema metadata lives in PRAGMA user_version instead.
+ */
+export const CHECKIN_SETTINGS_KEYS = [
+  'auth_token',
+  'checkin_cron',
+  'checkin_schedule_mode',
+  'checkin_interval_hours',
+  'system_proxy_url',
+] as const;
 
 export const CHECKIN_RETAINED_TABLES = [
   'sites',
@@ -30,10 +41,7 @@ export const CHECKIN_RETAINED_TABLES = [
   'checkin_logs',
   'model_availability',
   'token_model_availability',
-  'token_routes',
-  'route_channels',
   'settings',
-  'events',
 ] as const;
 
 /**
@@ -44,6 +52,8 @@ export const CHECKIN_RETAINED_TABLES = [
 export const CHECKIN_RETIRED_TABLES = [
   '__drizzle_migrations',
   'route_group_sources',
+  'route_channels',
+  'token_routes',
   'oauth_route_unit_members',
   'oauth_route_units',
   'proxy_debug_attempts',
@@ -58,6 +68,7 @@ export const CHECKIN_RETIRED_TABLES = [
   'model_day_usage',
   'downstream_api_keys',
   'site_announcements',
+  'events',
 ] as const;
 
 export const CHECKIN_TABLE_DDL: Record<string, string> = {
@@ -163,57 +174,9 @@ export const CHECKIN_TABLE_DDL: Record<string, string> = {
   "latency_ms" integer,
   "checked_at" text DEFAULT (datetime('now'))
 )`,
-  token_routes: `CREATE TABLE IF NOT EXISTS "token_routes" (
-  "id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-  "model_pattern" text NOT NULL,
-  "model_mapping" text,
-  "enabled" integer DEFAULT true,
-  "created_at" text DEFAULT (datetime('now')),
-  "updated_at" text DEFAULT (datetime('now')),
-  "display_name" text,
-  "display_icon" text,
-  "decision_snapshot" text,
-  "decision_refreshed_at" text,
-  "routing_strategy" text DEFAULT 'weighted',
-  "route_mode" text DEFAULT 'pattern',
-  "endpoint_policy" text DEFAULT 'auto'
-)`,
-  route_channels: `CREATE TABLE IF NOT EXISTS "route_channels" (
-  "id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-  "route_id" integer NOT NULL REFERENCES "token_routes"("id") ON DELETE cascade,
-  "account_id" integer NOT NULL REFERENCES "accounts"("id") ON DELETE cascade,
-  "token_id" integer REFERENCES "account_tokens"("id") ON DELETE set null,
-  "source_model" text,
-  "priority" integer DEFAULT 0,
-  "weight" integer DEFAULT 10,
-  "enabled" integer DEFAULT true,
-  "manual_override" integer DEFAULT false,
-  "success_count" integer DEFAULT 0,
-  "fail_count" integer DEFAULT 0,
-  "total_latency_ms" integer DEFAULT 0,
-  "total_cost" real DEFAULT 0,
-  "last_used_at" text,
-  "last_selected_at" text,
-  "last_fail_at" text,
-  "consecutive_fail_count" integer NOT NULL DEFAULT 0,
-  "cooldown_level" integer NOT NULL DEFAULT 0,
-  "cooldown_until" text,
-  "oauth_route_unit_id" integer
-)`,
   settings: `CREATE TABLE IF NOT EXISTS "settings" (
   "key" text PRIMARY KEY NOT NULL,
   "value" text
-)`,
-  events: `CREATE TABLE IF NOT EXISTS "events" (
-  "id" integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-  "type" text NOT NULL,
-  "title" text NOT NULL,
-  "message" text,
-  "level" text DEFAULT 'info' NOT NULL,
-  "read" integer DEFAULT false,
-  "related_id" integer,
-  "related_type" text,
-  "created_at" text DEFAULT (datetime('now'))
 )`,
 };
 
@@ -243,15 +206,4 @@ export const CHECKIN_INDEX_DDL: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS "token_model_availability_token_available_idx" ON "token_model_availability" ("token_id","available")',
   'CREATE INDEX IF NOT EXISTS "token_model_availability_model_name_idx" ON "token_model_availability" ("model_name")',
   'CREATE INDEX IF NOT EXISTS "token_model_availability_available_idx" ON "token_model_availability" ("available")',
-  'CREATE INDEX IF NOT EXISTS "token_routes_model_pattern_idx" ON "token_routes" ("model_pattern")',
-  'CREATE INDEX IF NOT EXISTS "token_routes_enabled_idx" ON "token_routes" ("enabled")',
-  'CREATE INDEX IF NOT EXISTS "route_channels_route_id_idx" ON "route_channels" ("route_id")',
-  'CREATE INDEX IF NOT EXISTS "route_channels_account_id_idx" ON "route_channels" ("account_id")',
-  'CREATE INDEX IF NOT EXISTS "route_channels_token_id_idx" ON "route_channels" ("token_id")',
-  'CREATE INDEX IF NOT EXISTS "route_channels_oauth_route_unit_id_idx" ON "route_channels" ("oauth_route_unit_id")',
-  'CREATE INDEX IF NOT EXISTS "route_channels_route_enabled_idx" ON "route_channels" ("route_id","enabled")',
-  'CREATE INDEX IF NOT EXISTS "route_channels_route_token_idx" ON "route_channels" ("route_id","token_id")',
-  'CREATE INDEX IF NOT EXISTS "events_read_created_at_idx" ON "events" ("read","created_at")',
-  'CREATE INDEX IF NOT EXISTS "events_type_created_at_idx" ON "events" ("type","created_at")',
-  'CREATE INDEX IF NOT EXISTS "events_created_at_idx" ON "events" ("created_at")',
 ];

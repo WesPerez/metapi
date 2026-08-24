@@ -3,30 +3,25 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('App sidebar config', () => {
-  it('uses 连接管理 for /accounts and removes standalone /tokens navigation item', () => {
+  it('keeps only the standalone check-in navigation entries', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
 
-    expect(source).toContain("{ to: '/accounts', label: '连接管理'");
+    expect(source).toContain("{ to: '/accounts?segment=session', label: '连接管理'");
+    expect(source).toContain("{ to: '/settings', label: '设置'");
     expect(source).not.toContain("{ to: '/accounts', label: '账号'");
     expect(source).not.toContain("{ to: '/tokens', label: '令牌管理'");
+    expect(source).not.toContain("{ to: '/downstream-keys'");
+    expect(source).not.toContain("{ to: '/oauth'");
   });
 
-  it('places downstream key navigation under 控制台 instead of 系统', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
-    const consoleGroupIndex = source.indexOf("label: '控制台'");
-    const downstreamIndex = source.indexOf("{ to: '/downstream-keys', label: '下游密钥'");
-    const systemGroupIndex = source.indexOf("label: '系统'");
-
-    expect(consoleGroupIndex).toBeGreaterThanOrEqual(0);
-    expect(downstreamIndex).toBeGreaterThan(consoleGroupIndex);
-    expect(systemGroupIndex).toBeGreaterThan(downstreamIndex);
-  });
-
-  it('adds standalone OAuth 管理 navigation entry', () => {
+  it('loads only account and settings pages and redirects unknown routes to accounts', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/web/App.tsx'), 'utf8');
 
-    expect(source).toContain("{ to: '/oauth', label: 'OAuth 管理'");
-    expect(source).toContain("const OAuthManagement = lazy(() => import('./pages/OAuthManagement.js'));");
-    expect(source).toContain('<Route path="/oauth" element={<OAuthManagement />} />');
+    expect(source).toContain("const Accounts = lazy(() => import('./pages/Accounts.js'));");
+    expect(source).toContain("const Settings = lazy(() => import('./pages/Settings.js'));");
+    expect(source).toContain('<Route path="/accounts" element={<Accounts />} />');
+    expect(source).toContain('<Route path="/settings" element={<Settings />} />');
+    expect(source).toContain('<Navigate to="/accounts?segment=session" replace />');
+    expect(source).not.toContain("lazy(() => import('./pages/OAuthManagement.js'))");
   });
 });

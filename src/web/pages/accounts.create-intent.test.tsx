@@ -74,20 +74,6 @@ describe('Accounts create intent handling', () => {
     }
   });
 
-  it('opens the apikey add modal and preselects the site for apikey create intent', async () => {
-    const root = await renderAccounts('/accounts?segment=apikey&create=1&siteId=10');
-    try {
-      const rendered = JSON.stringify(root.toJSON());
-      expect(rendered).toContain('添加 API Key 连接');
-
-      const selects = root.root.findAllByType(ModernSelect);
-      const sitePreselect = selects.find((node: any) => String(node?.props?.value || '') === '10');
-      expect(sitePreselect?.props.value).toBe('10');
-    } finally {
-      root?.unmount();
-    }
-  });
-
   it('uses searchable site selectors for manual connection creation', async () => {
     const root = await renderAccounts('/accounts', [
       { id: 10, name: 'Demo Site', url: 'https://demo.example.com', platform: 'new-api', status: 'active' },
@@ -123,14 +109,4 @@ describe('Accounts create intent handling', () => {
     }
   });
 
-  it('ignores create intent in the tokens segment', async () => {
-    const root = await renderAccounts('/accounts?segment=tokens&create=1&siteId=10');
-    try {
-      const rendered = JSON.stringify(root.toJSON());
-      expect(rendered).not.toContain('添加 Session 连接');
-      expect(rendered).not.toContain('添加 API Key 连接');
-    } finally {
-      root?.unmount();
-    }
-  });
 });

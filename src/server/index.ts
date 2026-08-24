@@ -52,10 +52,13 @@ export const CHECKIN_RETAINED_ROUTE_NAMES = [
   'sites',
   'accounts',
   'checkin',
-  'tokens',
   'stats',
   'auth',
   'settings',
+] as const;
+
+export const CHECKIN_NORMAL_ONLY_ROUTE_NAMES = [
+  'tokens',
   'accountTokens',
 ] as const;
 
@@ -78,9 +81,7 @@ export const CHECKIN_STARTUP_STEPS_ALWAYS = [
   'ensureSiteCompatibilityColumns',
   'ensureRouteGroupingCompatibilityColumns',
   'migrateSiteApiKeysToAccounts',
-  'ensureDefaultSitesSeeded',
   'ensureAccountScopedResinProxyIdentityBackfill',
-  'rebuildRoutesOnly',
   'startCheckinScheduler',
 ] as const;
 
@@ -90,6 +91,8 @@ export const CHECKIN_STARTUP_STEPS_NORMAL_ONLY = [
   'ensureProxyLogClientColumns',
   'ensureProxyLogDownstreamApiKeyIdColumn',
   'ensureProxyLogBillingDetailsColumn',
+  'ensureDefaultSitesSeeded',
+  'rebuildRoutesOnly',
   'repairStoredCreatedAtValues',
   'ensureOauthIdentityBackfill',
   'ensureOauthProviderSitesExist',
@@ -103,13 +106,52 @@ export type CheckinRoutePlan = {
   skippedRoutes: string[];
 };
 
+const CHECKIN_API_ROUTES: ReadonlyArray<{ method: string; path: RegExp }> = [
+  { method: 'GET', path: /^\/api\/desktop\/health$/u },
+  { method: 'GET', path: /^\/api\/settings\/auth\/info$/u },
+  { method: 'POST', path: /^\/api\/settings\/auth\/change$/u },
+  { method: 'GET', path: /^\/api\/settings\/runtime$/u },
+  { method: 'PUT', path: /^\/api\/settings\/runtime$/u },
+  { method: 'POST', path: /^\/api\/settings\/system-proxy\/test$/u },
+  { method: 'GET', path: /^\/api\/accounts$/u },
+  { method: 'POST', path: /^\/api\/accounts$/u },
+  { method: 'POST', path: /^\/api\/accounts\/login$/u },
+  { method: 'POST', path: /^\/api\/accounts\/verify-token$/u },
+  { method: 'POST', path: /^\/api\/accounts\/batch$/u },
+  { method: 'POST', path: /^\/api\/accounts\/health\/refresh$/u },
+  { method: 'POST', path: /^\/api\/accounts\/\d+\/rebind-session$/u },
+  { method: 'PUT', path: /^\/api\/accounts\/\d+$/u },
+  { method: 'DELETE', path: /^\/api\/accounts\/\d+$/u },
+  { method: 'POST', path: /^\/api\/accounts\/\d+\/balance$/u },
+  { method: 'GET', path: /^\/api\/accounts\/\d+\/models$/u },
+  { method: 'POST', path: /^\/api\/accounts\/\d+\/models\/manual$/u },
+  { method: 'POST', path: /^\/api\/models\/check\/\d+$/u },
+  { method: 'GET', path: /^\/api\/sites\/\d+\/disabled-models$/u },
+  { method: 'PUT', path: /^\/api\/sites\/\d+\/disabled-models$/u },
+  { method: 'POST', path: /^\/api\/checkin\/trigger$/u },
+  { method: 'POST', path: /^\/api\/checkin\/trigger\/\d+$/u },
+  { method: 'GET', path: /^\/api\/checkin\/logs$/u },
+  { method: 'PUT', path: /^\/api\/checkin\/schedule$/u },
+];
+
+export function isCheckinApiRequestAllowed(method: string, url: string): boolean {
+  if (!url.startsWith('/api/')) return true;
+  if (method.toUpperCase() === 'OPTIONS') return true;
+  const path = url.split('?', 1)[0];
+  const normalizedMethod = method.toUpperCase();
+  return CHECKIN_API_ROUTES.some((route) => route.method === normalizedMethod && route.path.test(path));
+}
+
 export function getCheckinRoutePlan(checkinAppMode: boolean): CheckinRoutePlan {
   const retiredRoutes = [...CHECKIN_RETIRED_ROUTE_NAMES];
+  const retainedRoutes = checkinAppMode
+    ? [...CHECKIN_RETAINED_ROUTE_NAMES]
+    : [...CHECKIN_RETAINED_ROUTE_NAMES, ...CHECKIN_NORMAL_ONLY_ROUTE_NAMES];
   return {
     checkinAppMode,
     registeredRoutes: checkinAppMode
-      ? [...CHECKIN_RETAINED_ROUTE_NAMES]
-      : [...CHECKIN_RETAINED_ROUTE_NAMES, ...retiredRoutes],
+      ? retainedRoutes
+      : [...retainedRoutes, ...retiredRoutes],
     skippedRoutes: checkinAppMode ? retiredRoutes : [],
   };
 }
@@ -335,7 +377,9 @@ export async function main(): Promise<void> {
       await repairStoredCreatedAtValues();
     }
     await migrateSiteApiKeysToAccounts();
-    await ensureDefaultSitesSeeded();
+    if (!config.checkinAppMode) {
+      await ensureDefaultSitesSeeded();
+    }
     if (!config.checkinAppMode) {
       const { ensureOauthIdentityBackfill } = await import('./services/oauth/oauthIdentityBackfill.js');
       await ensureOauthIdentityBackfill();
@@ -344,7 +388,9 @@ export async function main(): Promise<void> {
     if (resinProxyIdentityBackfillCount > 0) {
       console.log(`Backfilled ${resinProxyIdentityBackfillCount} account-scoped Resin proxy identities`);
     }
-    await routeRefreshWorkflow.rebuildRoutesOnly();
+    if (!config.checkinAppMode) {
+      await routeRefreshWorkflow.rebuildRoutesOnly();
+    }
 
     console.log('Loaded runtime settings overrides');
   } catch (error) {
@@ -362,6 +408,9 @@ export async function main(): Promise<void> {
 
   // Auth middleware for /api routes
   app.addHook('onRequest', async (request, reply) => {
+    if (config.checkinAppMode && !isCheckinApiRequestAllowed(request.method, request.url)) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
     if (request.url.startsWith('/api/') && !isPublicApiRoute(request.url)) {
       await authMiddleware(request, reply);
     }
@@ -372,12 +421,12 @@ export async function main(): Promise<void> {
   await app.register(sitesRoutes);
   await app.register(accountsRoutes);
   await app.register(checkinRoutes);
-  await app.register(tokensRoutes);
   await app.register(statsRoutes);
   await app.register(authRoutes);
   await app.register(settingsRoutes);
-  await app.register(accountTokensRoutes);
   if (!config.checkinAppMode) {
+    await app.register(tokensRoutes);
+    await app.register(accountTokensRoutes);
     await registerRetiredRoutes(app);
   }
 
